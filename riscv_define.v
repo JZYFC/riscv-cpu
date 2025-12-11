@@ -44,6 +44,59 @@
 `define DECODE_OP_DUMMY  `ALU_OP_WIDTH+8   // unknown / unsupported opcode
 `define DECODE_OP_WIDTH  `ALU_OP_WIDTH+9
 
+// Post-decode functional unit selections (after rename)
+`define FU_DEC_WIDTH 3
+`define FU_DEC_INT       3'd0
+`define FU_DEC_MULDIV    3'd1
+`define FU_DEC_LSU       3'd2
+`define FU_DEC_BRANCH    3'd3
+`define FU_DEC_FP        3'd4
+`define FU_DEC_SYSTEM    3'd5
+`define FU_DEC_DUMMY     3'd7
+
+// Branch micro-ops
+`define BR_OP_WIDTH 4
+`define BR_OP_NONE  4'd0
+`define BR_OP_BEQ   4'd1
+`define BR_OP_BNE   4'd2
+`define BR_OP_BLT   4'd3
+`define BR_OP_BGE   4'd4
+`define BR_OP_BLTU  4'd5
+`define BR_OP_BGEU  4'd6
+`define BR_OP_JAL   4'd7
+`define BR_OP_JALR  4'd8
+
+// Memory micro-ops (load/store + size/sign)
+`define MEM_OP_WIDTH 3
+`define MEM_OP_LB    3'd0
+`define MEM_OP_LH    3'd1
+`define MEM_OP_LW    3'd2
+`define MEM_OP_LBU   3'd3
+`define MEM_OP_LHU   3'd4
+`define MEM_OP_SB    3'd5
+`define MEM_OP_SH    3'd6
+`define MEM_OP_SW    3'd7
+
+// CSR/system micro-ops
+`define CSR_OP_WIDTH 2
+`define CSR_OP_NONE  2'd0
+`define CSR_OP_RW    2'd1
+`define CSR_OP_RS    2'd2
+`define CSR_OP_RC    2'd3
+
+// Floating-point micro-ops (placeholder set)
+`define FP_OP_WIDTH 4
+`define FP_OP_ADD   4'd0
+`define FP_OP_SUB   4'd1
+`define FP_OP_MUL   4'd2
+`define FP_OP_DIV   4'd3
+`define FP_OP_FMA   4'd4
+`define FP_OP_SQRT  4'd5
+`define FP_OP_CVT   4'd6
+`define FP_OP_MV    4'd7
+`define FP_OP_CMP   4'd8
+`define FP_OP_DUMMY 4'd15
+
 // ROB parameters
 `define ROB_SIZE      32
 `define ROB_IDX_WIDTH 5   // log2(ROB_SIZE)
