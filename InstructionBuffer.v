@@ -52,6 +52,7 @@ module InstructionBuffer #(
     reg [PTR_W-1:0] head;
     reg [PTR_W-1:0] tail;
     reg [PTR_W:0]   count;
+    reg [PTR_W-1:0] tail_next;
 
     wire [1:0] deq_cnt = out_ready ? ((count >= 2) ? 2'd2 : count[1:0]) : 2'd0;
     wire [1:0] in_cnt   = in_valid[0] + in_valid[1];
@@ -106,7 +107,6 @@ module InstructionBuffer #(
 
             // Enqueue (up to 2)
             if (can_enq && (in_cnt != 0)) begin
-                reg [PTR_W-1:0] tail_next;
                 tail_next = tail;
                 if (in_valid[0]) begin
                     fifo_inst[tail_next] <= in_inst_0;

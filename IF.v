@@ -123,7 +123,7 @@ module IF(
             second_clk_passed <= first_clk_passed;
             out_inst_addr_0 <= reg_PC;
             out_inst_addr_1 <= reg_PC + `INST_ADD_STEP;
-            out_inst_0 <= 32'h0000_0013; // NOP (ADDI x0, x0, 0)
+            out_inst_0 <= 32'h0010_0093; // ADDI x1, x0, 1 (bring-up)
             out_inst_1 <= 32'h0000_0013;
             out_inst_valid  <= second_clk_passed ? (bp_pred_taken ? 2'b01 : {`IF_BATCH_SIZE{1'b1}}) : {`IF_BATCH_SIZE{1'b0}};
             out_pred_taken_0 <= bp_pred_taken & second_clk_passed;
