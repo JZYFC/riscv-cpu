@@ -9,7 +9,7 @@ module ibex_fpu
     output logic [31:0]               result_o,
     output logic                      exception_flag_o
   );
-	// import
+
     import ibex_pkg::*;
 	
 	//wire [31:0] result_o;
