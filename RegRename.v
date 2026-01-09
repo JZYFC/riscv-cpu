@@ -462,11 +462,13 @@ wire rs1_tag_valid0 = in_inst_valid[0] && (in_rs1_is_fp_0 ? fp_map_valid[in_rs1_
                      (!(~in_rs1_is_fp_0 && (in_rs1_0 == {`REG_ADDR_WIDTH{1'b0}})));
 wire rs2_tag_valid0 = in_inst_valid[0] && (in_rs2_is_fp_0 ? fp_map_valid[in_rs2_0] : int_map_valid[in_rs2_0]) &&
                      (!(~in_rs2_is_fp_0 && (in_rs2_0 == {`REG_ADDR_WIDTH{1'b0}})));
-wire rs1_tag_valid1 = in_inst_valid[1] && ((has_dest0 && same_dest_type && (in_rs1_1 == in_rd_0)) ||
-                     (in_rs1_is_fp_1 ? fp_map_valid[in_rs1_1] : int_map_valid[in_rs1_1])) &&
+wire rs1_dep0 = has_dest0 && same_dest_type && (in_rs1_1 == in_rd_0);
+wire rs2_dep0 = has_dest0 && same_dest_type && (in_rs2_1 == in_rd_0);
+wire rs1_tag_valid1 = in_inst_valid[1] && !rs1_dep0 &&
+                     (in_rs1_is_fp_1 ? fp_map_valid[in_rs1_1] : int_map_valid[in_rs1_1]) &&
                      (!(~in_rs1_is_fp_1 && (in_rs1_1 == {`REG_ADDR_WIDTH{1'b0}})));
-wire rs2_tag_valid1 = in_inst_valid[1] && ((has_dest0 && same_dest_type && (in_rs2_1 == in_rd_0)) ||
-                     (in_rs2_is_fp_1 ? fp_map_valid[in_rs2_1] : int_map_valid[in_rs2_1])) &&
+wire rs2_tag_valid1 = in_inst_valid[1] && !rs2_dep0 &&
+                     (in_rs2_is_fp_1 ? fp_map_valid[in_rs2_1] : int_map_valid[in_rs2_1]) &&
                      (!(~in_rs2_is_fp_1 && (in_rs2_1 == {`REG_ADDR_WIDTH{1'b0}})));
 
 assign commit0_rob_idx = rob_commit0_idx;
@@ -784,7 +786,9 @@ always @(posedge clk or negedge rst_n) begin
             end
 
             if (in_inst_valid[1]) begin
+                out_inst_1 <= in_inst_1;
                 out_pc_1 <= in_pc_1;
+                out_fu_type_1 <= in_fu_type_1;
                 out_rs1_1 <= in_rs1_1;
                 out_rs2_1 <= in_rs2_1;
                 out_rd_1  <= in_rd_1;

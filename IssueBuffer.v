@@ -195,7 +195,7 @@ module IssueBuffer #(
 
     reg [`DATA_WIDTH-1:0] csr_file [0:4095];
 
-    wire [2:0] enq_need = in_inst_valid[0] + in_inst_valid[1];
+    wire [2:0] enq_need = {2'b0, in_inst_valid[0]} + {2'b0, in_inst_valid[1]};
     wire [RS_DEPTH:0] free_slots = RS_DEPTH - rs_count;
     assign stall_dispatch = (enq_need > free_slots);
 
@@ -509,7 +509,8 @@ module IssueBuffer #(
     integer i_idx;
     integer issue_cnt;
     integer enq_cnt;
-    integer found_idx;
+    integer found_idx0;
+    integer found_idx1;
     integer pick;
 
     always @(posedge clk or negedge rst_n) begin
@@ -694,119 +695,119 @@ module IssueBuffer #(
             end
 
             // Enqueue
+            found_idx0 = -1;
+            found_idx1 = -1;
             enq_cnt = 0;
             if (!stall_dispatch) begin
                 if (in_inst_valid[0]) begin
-                    found_idx = -1;
                     for (i_idx = 0; i_idx < RS_DEPTH; i_idx = i_idx + 1) begin
-                        if (!rs_valid[i_idx] && found_idx == -1) found_idx = i_idx;
-                    end
-                    if (found_idx != -1) begin
-                        rs_valid[found_idx]      <= 1'b1;
-                        rs_age[found_idx]        <= age_counter;
-                        rs_fu_sel[found_idx]     <= in_fu_sel_0;
-                        rs_int_op[found_idx]     <= in_int_op_0;
-                        rs_int_sub[found_idx]    <= in_int_is_sub_0;
-                        rs_cmp_signed[found_idx] <= in_cmp_signed_0;
-                        rs_muldiv_op[found_idx]  <= in_muldiv_op_0;
-                        rs_mul_high[found_idx]   <= in_mul_high_0;
-                        rs_mul_signed_rs1[found_idx] <= in_mul_signed_rs1_0;
-                        rs_mul_signed_rs2[found_idx] <= in_mul_signed_rs2_0;
-                        rs_div_signed[found_idx] <= in_div_signed_0;
-                        rs_div_is_rem[found_idx] <= in_div_is_rem_0;
-                        rs_branch_op[found_idx]  <= in_branch_op_0;
-                        rs_mem_op[found_idx]     <= in_mem_op_0;
-                        rs_mem_is_load[found_idx]<= in_mem_is_load_0;
-                        rs_mem_unsigned[found_idx]<= in_mem_unsigned_0;
-                        rs_csr_op[found_idx]     <= in_csr_op_0;
-                        rs_csr_addr[found_idx]   <= in_csr_addr_0;
-                        rs_fp_op[found_idx]      <= in_fp_op_0;
-                        rs_illegal[found_idx]    <= in_illegal_0;
-                        rs_inst[found_idx]       <= in_inst_0;
-                        rs_pc[found_idx]         <= in_pc_0;
-                        rs_imm[found_idx]        <= in_imm_0;
-                        rs_use_imm[found_idx]    <= in_use_imm_0;
-                        rs_pred_taken[found_idx] <= in_pred_taken_0;
-                        rs_pred_target[found_idx]<= in_pred_target_0;
-                        rs_pred_hist[found_idx]  <= in_pred_hist_0;
-                        rs_arch_rd[found_idx]    <= in_rd_0;
-                        rs_arch_rs1[found_idx]   <= in_rs1_0;
-                        rs_rs1_ready[found_idx]  <= in_rs1_preg_valid_0 || rs1_cdb0_hit_0 || rs1_cdb1_hit_0 || rs1_is_x0_0;
-                        rs_rs2_ready[found_idx]  <= in_rs2_preg_valid_0 || rs2_cdb0_hit_0 || rs2_cdb1_hit_0 || rs2_is_x0_0;
-                        rs_rs1_tag[found_idx]    <= in_rs1_preg_0;
-                        rs_rs2_tag[found_idx]    <= in_rs2_preg_0;
-                        rs_rs1_val[found_idx]    <= rs1_is_x0_0 ? {`DATA_WIDTH{1'b0}} :
-                                                    in_rs1_preg_valid_0 ? (in_rs1_is_fp_0 ? fp_rs1_data0 : int_rs1_data0) :
-                                                    rs1_cdb1_hit_0 ? cdb1_value :
-                                                    rs1_cdb0_hit_0 ? cdb0_value :
-                                                    {`DATA_WIDTH{1'b0}};
-                        rs_rs2_val[found_idx]    <= rs2_is_x0_0 ? {`DATA_WIDTH{1'b0}} :
-                                                    in_rs2_preg_valid_0 ? (in_rs2_is_fp_0 ? fp_rs2_data0 : int_rs2_data0) :
-                                                    rs2_cdb1_hit_0 ? cdb1_value :
-                                                    rs2_cdb0_hit_0 ? cdb0_value :
-                                                    {`DATA_WIDTH{1'b0}};
-                        rs_rd_tag[found_idx]     <= in_rd_preg_0;
-                        rs_rd_is_fp[found_idx]   <= in_rd_is_fp_0;
-                        rs_rob_idx[found_idx]    <= in_rob_idx_0;
-                        enq_cnt = enq_cnt + 1;
-                        age_counter <= age_counter + 1'b1;
+                        if (!rs_valid[i_idx] && found_idx0 == -1) found_idx0 = i_idx;
                     end
                 end
                 if (in_inst_valid[1]) begin
-                    found_idx = -1;
                     for (i_idx = 0; i_idx < RS_DEPTH; i_idx = i_idx + 1) begin
-                        if (!rs_valid[i_idx] && found_idx == -1) found_idx = i_idx;
+                        if (!rs_valid[i_idx] && (i_idx != found_idx0) && found_idx1 == -1) found_idx1 = i_idx;
                     end
-                    if (found_idx != -1) begin
-                        rs_valid[found_idx]      <= 1'b1;
-                        rs_age[found_idx]        <= age_counter;
-                        rs_fu_sel[found_idx]     <= in_fu_sel_1;
-                        rs_int_op[found_idx]     <= in_int_op_1;
-                        rs_int_sub[found_idx]    <= in_int_is_sub_1;
-                        rs_cmp_signed[found_idx] <= in_cmp_signed_1;
-                        rs_muldiv_op[found_idx]  <= in_muldiv_op_1;
-                        rs_mul_high[found_idx]   <= in_mul_high_1;
-                        rs_mul_signed_rs1[found_idx] <= in_mul_signed_rs1_1;
-                        rs_mul_signed_rs2[found_idx] <= in_mul_signed_rs2_1;
-                        rs_div_signed[found_idx] <= in_div_signed_1;
-                        rs_div_is_rem[found_idx] <= in_div_is_rem_1;
-                        rs_branch_op[found_idx]  <= in_branch_op_1;
-                        rs_mem_op[found_idx]     <= in_mem_op_1;
-                        rs_mem_is_load[found_idx]<= in_mem_is_load_1;
-                        rs_mem_unsigned[found_idx]<= in_mem_unsigned_1;
-                        rs_csr_op[found_idx]     <= in_csr_op_1;
-                        rs_csr_addr[found_idx]   <= in_csr_addr_1;
-                        rs_fp_op[found_idx]      <= in_fp_op_1;
-                        rs_illegal[found_idx]    <= in_illegal_1;
-                        rs_inst[found_idx]       <= in_inst_1;
-                        rs_pc[found_idx]         <= in_pc_1;
-                        rs_imm[found_idx]        <= in_imm_1;
-                        rs_use_imm[found_idx]    <= in_use_imm_1;
-                        rs_pred_taken[found_idx] <= in_pred_taken_1;
-                        rs_pred_target[found_idx]<= in_pred_target_1;
-                        rs_pred_hist[found_idx]  <= in_pred_hist_1;
-                        rs_arch_rd[found_idx]    <= in_rd_1;
-                        rs_arch_rs1[found_idx]   <= in_rs1_1;
-                        rs_rs1_ready[found_idx]  <= in_rs1_preg_valid_1 || rs1_cdb0_hit_1 || rs1_cdb1_hit_1 || rs1_is_x0_1;
-                        rs_rs2_ready[found_idx]  <= in_rs2_preg_valid_1 || rs2_cdb0_hit_1 || rs2_cdb1_hit_1 || rs2_is_x0_1;
-                        rs_rs1_tag[found_idx]    <= in_rs1_preg_1;
-                        rs_rs2_tag[found_idx]    <= in_rs2_preg_1;
-                        rs_rs1_val[found_idx]    <= rs1_is_x0_1 ? {`DATA_WIDTH{1'b0}} :
-                                                    in_rs1_preg_valid_1 ? (in_rs1_is_fp_1 ? fp_rs1_data1 : int_rs1_data1) :
-                                                    rs1_cdb1_hit_1 ? cdb1_value :
-                                                    rs1_cdb0_hit_1 ? cdb0_value :
-                                                    {`DATA_WIDTH{1'b0}};
-                        rs_rs2_val[found_idx]    <= rs2_is_x0_1 ? {`DATA_WIDTH{1'b0}} :
-                                                    in_rs2_preg_valid_1 ? (in_rs2_is_fp_1 ? fp_rs2_data1 : int_rs2_data1) :
-                                                    rs2_cdb1_hit_1 ? cdb1_value :
-                                                    rs2_cdb0_hit_1 ? cdb0_value :
-                                                    {`DATA_WIDTH{1'b0}};
-                        rs_rd_tag[found_idx]     <= in_rd_preg_1;
-                        rs_rd_is_fp[found_idx]   <= in_rd_is_fp_1;
-                        rs_rob_idx[found_idx]    <= in_rob_idx_1;
-                        enq_cnt = enq_cnt + 1;
-                        age_counter <= age_counter + 1'b1;
-                    end
+                end
+                if (found_idx0 != -1) begin
+                    rs_valid[found_idx0]      <= 1'b1;
+                    rs_age[found_idx0]        <= age_counter;
+                    rs_fu_sel[found_idx0]     <= in_fu_sel_0;
+                    rs_int_op[found_idx0]     <= in_int_op_0;
+                    rs_int_sub[found_idx0]    <= in_int_is_sub_0;
+                    rs_cmp_signed[found_idx0] <= in_cmp_signed_0;
+                    rs_muldiv_op[found_idx0]  <= in_muldiv_op_0;
+                    rs_mul_high[found_idx0]   <= in_mul_high_0;
+                    rs_mul_signed_rs1[found_idx0] <= in_mul_signed_rs1_0;
+                    rs_mul_signed_rs2[found_idx0] <= in_mul_signed_rs2_0;
+                    rs_div_signed[found_idx0] <= in_div_signed_0;
+                    rs_div_is_rem[found_idx0] <= in_div_is_rem_0;
+                    rs_branch_op[found_idx0]  <= in_branch_op_0;
+                    rs_mem_op[found_idx0]     <= in_mem_op_0;
+                    rs_mem_is_load[found_idx0]<= in_mem_is_load_0;
+                    rs_mem_unsigned[found_idx0]<= in_mem_unsigned_0;
+                    rs_csr_op[found_idx0]     <= in_csr_op_0;
+                    rs_csr_addr[found_idx0]   <= in_csr_addr_0;
+                    rs_fp_op[found_idx0]      <= in_fp_op_0;
+                    rs_illegal[found_idx0]    <= in_illegal_0;
+                    rs_inst[found_idx0]       <= in_inst_0;
+                    rs_pc[found_idx0]         <= in_pc_0;
+                    rs_imm[found_idx0]        <= in_imm_0;
+                    rs_use_imm[found_idx0]    <= in_use_imm_0;
+                    rs_pred_taken[found_idx0] <= in_pred_taken_0;
+                    rs_pred_target[found_idx0]<= in_pred_target_0;
+                    rs_pred_hist[found_idx0]  <= in_pred_hist_0;
+                    rs_arch_rd[found_idx0]    <= in_rd_0;
+                    rs_arch_rs1[found_idx0]   <= in_rs1_0;
+                    rs_rs1_ready[found_idx0]  <= in_rs1_preg_valid_0 || rs1_cdb0_hit_0 || rs1_cdb1_hit_0 || rs1_is_x0_0;
+                    rs_rs2_ready[found_idx0]  <= in_rs2_preg_valid_0 || rs2_cdb0_hit_0 || rs2_cdb1_hit_0 || rs2_is_x0_0;
+                    rs_rs1_tag[found_idx0]    <= in_rs1_preg_0;
+                    rs_rs2_tag[found_idx0]    <= in_rs2_preg_0;
+                    rs_rs1_val[found_idx0]    <= rs1_is_x0_0 ? {`DATA_WIDTH{1'b0}} :
+                                                in_rs1_preg_valid_0 ? (in_rs1_is_fp_0 ? fp_rs1_data0 : int_rs1_data0) :
+                                                rs1_cdb1_hit_0 ? cdb1_value :
+                                                rs1_cdb0_hit_0 ? cdb0_value :
+                                                {`DATA_WIDTH{1'b0}};
+                    rs_rs2_val[found_idx0]    <= rs2_is_x0_0 ? {`DATA_WIDTH{1'b0}} :
+                                                in_rs2_preg_valid_0 ? (in_rs2_is_fp_0 ? fp_rs2_data0 : int_rs2_data0) :
+                                                rs2_cdb1_hit_0 ? cdb1_value :
+                                                rs2_cdb0_hit_0 ? cdb0_value :
+                                                {`DATA_WIDTH{1'b0}};
+                    rs_rd_tag[found_idx0]     <= in_rd_preg_0;
+                    rs_rd_is_fp[found_idx0]   <= in_rd_is_fp_0;
+                    rs_rob_idx[found_idx0]    <= in_rob_idx_0;
+                    enq_cnt = enq_cnt + 1;
+                    age_counter <= age_counter + 1'b1;
+                end
+                if (found_idx1 != -1) begin
+                    rs_valid[found_idx1]      <= 1'b1;
+                    rs_age[found_idx1]        <= age_counter;
+                    rs_fu_sel[found_idx1]     <= in_fu_sel_1;
+                    rs_int_op[found_idx1]     <= in_int_op_1;
+                    rs_int_sub[found_idx1]    <= in_int_is_sub_1;
+                    rs_cmp_signed[found_idx1] <= in_cmp_signed_1;
+                    rs_muldiv_op[found_idx1]  <= in_muldiv_op_1;
+                    rs_mul_high[found_idx1]   <= in_mul_high_1;
+                    rs_mul_signed_rs1[found_idx1] <= in_mul_signed_rs1_1;
+                    rs_mul_signed_rs2[found_idx1] <= in_mul_signed_rs2_1;
+                    rs_div_signed[found_idx1] <= in_div_signed_1;
+                    rs_div_is_rem[found_idx1] <= in_div_is_rem_1;
+                    rs_branch_op[found_idx1]  <= in_branch_op_1;
+                    rs_mem_op[found_idx1]     <= in_mem_op_1;
+                    rs_mem_is_load[found_idx1]<= in_mem_is_load_1;
+                    rs_mem_unsigned[found_idx1]<= in_mem_unsigned_1;
+                    rs_csr_op[found_idx1]     <= in_csr_op_1;
+                    rs_csr_addr[found_idx1]   <= in_csr_addr_1;
+                    rs_fp_op[found_idx1]      <= in_fp_op_1;
+                    rs_illegal[found_idx1]    <= in_illegal_1;
+                    rs_inst[found_idx1]       <= in_inst_1;
+                    rs_pc[found_idx1]         <= in_pc_1;
+                    rs_imm[found_idx1]        <= in_imm_1;
+                    rs_use_imm[found_idx1]    <= in_use_imm_1;
+                    rs_pred_taken[found_idx1] <= in_pred_taken_1;
+                    rs_pred_target[found_idx1]<= in_pred_target_1;
+                    rs_pred_hist[found_idx1]  <= in_pred_hist_1;
+                    rs_arch_rd[found_idx1]    <= in_rd_1;
+                    rs_arch_rs1[found_idx1]   <= in_rs1_1;
+                    rs_rs1_ready[found_idx1]  <= in_rs1_preg_valid_1 || rs1_cdb0_hit_1 || rs1_cdb1_hit_1 || rs1_is_x0_1;
+                    rs_rs2_ready[found_idx1]  <= in_rs2_preg_valid_1 || rs2_cdb0_hit_1 || rs2_cdb1_hit_1 || rs2_is_x0_1;
+                    rs_rs1_tag[found_idx1]    <= in_rs1_preg_1;
+                    rs_rs2_tag[found_idx1]    <= in_rs2_preg_1;
+                    rs_rs1_val[found_idx1]    <= rs1_is_x0_1 ? {`DATA_WIDTH{1'b0}} :
+                                                in_rs1_preg_valid_1 ? (in_rs1_is_fp_1 ? fp_rs1_data1 : int_rs1_data1) :
+                                                rs1_cdb1_hit_1 ? cdb1_value :
+                                                rs1_cdb0_hit_1 ? cdb0_value :
+                                                {`DATA_WIDTH{1'b0}};
+                    rs_rs2_val[found_idx1]    <= rs2_is_x0_1 ? {`DATA_WIDTH{1'b0}} :
+                                                in_rs2_preg_valid_1 ? (in_rs2_is_fp_1 ? fp_rs2_data1 : int_rs2_data1) :
+                                                rs2_cdb1_hit_1 ? cdb1_value :
+                                                rs2_cdb0_hit_1 ? cdb0_value :
+                                                {`DATA_WIDTH{1'b0}};
+                    rs_rd_tag[found_idx1]     <= in_rd_preg_1;
+                    rs_rd_is_fp[found_idx1]   <= in_rd_is_fp_1;
+                    rs_rob_idx[found_idx1]    <= in_rob_idx_1;
+                    enq_cnt = enq_cnt + 1;
+                    age_counter <= age_counter + 1'b1;
                 end
             end
 

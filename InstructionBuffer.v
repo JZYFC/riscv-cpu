@@ -55,7 +55,7 @@ module InstructionBuffer #(
     reg [PTR_W-1:0] tail_next;
 
     wire [1:0] deq_cnt = out_ready ? ((count >= 2) ? 2'd2 : count[1:0]) : 2'd0;
-    wire [1:0] in_cnt   = in_valid[0] + in_valid[1];
+    wire [1:0] in_cnt   = {1'b0, in_valid[0]} + {1'b0, in_valid[1]};
     wire [PTR_W:0] free_slots = DEPTH - count;
     wire [PTR_W:0] avail_next = free_slots + deq_cnt; // space after dequeue in this cycle
     wire can_enq = (in_cnt <= avail_next);

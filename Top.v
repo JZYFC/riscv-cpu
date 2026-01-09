@@ -153,6 +153,10 @@ InstructionBuffer u_ibuf (
 // Pre-decode
 // ----------------------------
 wire [`IF_BATCH_SIZE-1:0] pre_valid;
+wire [`INST_WIDTH-1:0] pre_inst_0;
+wire [`INST_WIDTH-1:0] pre_inst_1;
+wire [`INST_ADDR_WIDTH-1:0] pre_pc_0;
+wire [`INST_ADDR_WIDTH-1:0] pre_pc_1;
 wire [1:0] pre_fu_type_0;
 wire [1:0] pre_fu_type_1;
 wire [`REG_ADDR_WIDTH-1:0] pre_rs1_0;
@@ -180,6 +184,8 @@ PreDecode u_predecode (
     .rst_n(rst_n),
     .in_inst_0(ib_inst_0),
     .in_inst_1(ib_inst_1),
+    .in_pc_0(ib_pc_0),
+    .in_pc_1(ib_pc_1),
     .in_inst_valid(dispatch_ready ? ib_valid : {`IF_BATCH_SIZE{1'b0}}),
     .in_pred_taken_0(ib_pred_taken_0),
     .in_pred_target_0(ib_pred_target_0),
@@ -188,6 +194,10 @@ PreDecode u_predecode (
     .in_pred_target_1(ib_pred_target_1),
     .in_pred_hist_1(ib_pred_hist_1),
     .out_inst_valid(pre_valid),
+    .out_inst_0(pre_inst_0),
+    .out_inst_1(pre_inst_1),
+    .out_pc_0(pre_pc_0),
+    .out_pc_1(pre_pc_1),
     .out_pred_taken_0(pre_pred_taken_0),
     .out_pred_target_0(pre_pred_target_0),
     .out_pred_hist_0(pre_pred_hist_0),
@@ -282,10 +292,10 @@ RegRename u_regrename (
     .flush_rob_idx(redirect_valid ? redirect_rob_idx :
                                (commit_exc ? commit0_rob_idx : {`ROB_IDX_WIDTH{1'b0}})),
     .in_inst_valid(pre_valid),
-    .in_pc_0(ib_pc_0),
-    .in_pc_1(ib_pc_1),
-    .in_inst_0(ib_inst_0),
-    .in_inst_1(ib_inst_1),
+    .in_pc_0(pre_pc_0),
+    .in_pc_1(pre_pc_1),
+    .in_inst_0(pre_inst_0),
+    .in_inst_1(pre_inst_1),
     .in_fu_type_0(pre_fu_type_0),
     .in_fu_type_1(pre_fu_type_1),
     .in_pred_taken_0(pre_pred_taken_0),

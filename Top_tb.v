@@ -352,6 +352,148 @@ module Top_tb;
         end
     endtask
 
+    task run_dual_test;
+        input integer idx;
+        input [31:0] inst0;
+        input [31:0] inst1;
+        input [31:0] pc;
+        input [4:0]  rd0;
+        input [4:0]  rs10;
+        input [31:0] rs10_val;
+        input [4:0]  rs20;
+        input [31:0] rs20_val;
+        input [31:0] exp0;
+        input [4:0]  rd1;
+        input [4:0]  rs11;
+        input [31:0] rs11_val;
+        input [4:0]  rs21;
+        input [31:0] rs21_val;
+        input [31:0] exp1;
+        integer cycles;
+        integer count;
+        integer inject_wait;
+        reg pass;
+        reg [4:0] got_rd0;
+        reg [4:0] got_rd1;
+        reg [31:0] got_val0;
+        reg [31:0] got_val1;
+        begin
+            rst_n = 1'b0;
+            repeat (5) @(posedge clk);
+            rst_n = 1'b1;
+            @(posedge clk);
+            write_prf(rs10, rs10_val);
+            write_prf(rs20, rs20_val);
+            write_prf(rs11, rs11_val);
+            write_prf(rs21, rs21_val);
+
+            force dut.u_if.out_inst_0 = inst0;
+            force dut.u_if.out_inst_1 = inst1;
+            force dut.u_if.out_inst_valid = 2'b11;
+            force dut.u_if.out_inst_addr_0 = pc;
+            force dut.u_if.out_inst_addr_1 = pc + 32'd4;
+            inject_wait = 0;
+            while (inject_wait < 10 && dut.ib_valid == 2'b00) begin
+                @(posedge clk);
+                #1;
+                inject_wait = inject_wait + 1;
+            end
+            force dut.u_if.out_inst_valid = 2'b00;
+
+            pass = 1'b1;
+            count = 0;
+            got_rd0 = 5'd0;
+            got_rd1 = 5'd0;
+            got_val0 = 32'h0;
+            got_val1 = 32'h0;
+
+            begin : wait_dual_commit
+                cycles = 0;
+                while (cycles < 200) begin
+                    @(posedge clk);
+                    #1;
+                    cycles = cycles + 1;
+                    if (dut.commit0_valid) begin
+                        if (count == 0) begin
+                            got_rd0 = dut.commit0_arch_rd;
+                            got_val0 = dut.commit0_value;
+                            if ((dut.commit0_arch_rd !== rd0) || (dut.commit0_value !== exp0)) begin
+                                pass = 1'b0;
+                            end
+                        end else if (count == 1) begin
+                            got_rd1 = dut.commit0_arch_rd;
+                            got_val1 = dut.commit0_value;
+                            if ((dut.commit0_arch_rd !== rd1) || (dut.commit0_value !== exp1)) begin
+                                pass = 1'b0;
+                            end
+                        end
+                        count = count + 1;
+                    end
+                    if (dut.commit1_valid) begin
+                        if (count == 0) begin
+                            got_rd0 = dut.commit1_arch_rd;
+                            got_val0 = dut.commit1_value;
+                            if ((dut.commit1_arch_rd !== rd0) || (dut.commit1_value !== exp0)) begin
+                                pass = 1'b0;
+                            end
+                        end else if (count == 1) begin
+                            got_rd1 = dut.commit1_arch_rd;
+                            got_val1 = dut.commit1_value;
+                            if ((dut.commit1_arch_rd !== rd1) || (dut.commit1_value !== exp1)) begin
+                                pass = 1'b0;
+                            end
+                        end
+                        count = count + 1;
+                    end
+                    if (!pass) begin
+                        $display("DBG_DUAL[%0d] cyc=%0d if=%b ib_stall=%b ib=%b pre=%b rn=%b post=%b post0=%h post1=%h il0=%b il1=%b rs_cnt=%0d idx0=%0d idx1=%0d wb0=%b wb1=%b wb_exc0=%b wb_exc1=%b c0=%b c1=%b c0_exc=%b c1_exc=%b rn_stall=%b issue_stall=%b disp_ready=%b flush=%b redirect=%b",
+                                 idx, cycles,
+                                 dut.if_inst_valid, dut.ib_stall_if, dut.ib_valid, dut.pre_valid, dut.rn_valid, dut.post_valid,
+                                 dut.post_inst_0, dut.post_inst_1, dut.post_illegal_0, dut.post_illegal_1,
+                                 dut.u_issue.rs_count, dut.u_issue.issue_idx0, dut.u_issue.issue_idx1,
+                                 dut.u_issue.wb0_valid, dut.u_issue.wb1_valid,
+                                 dut.wb0_exception_exe, dut.wb1_exception_exe,
+                                 dut.commit0_valid, dut.commit1_valid,
+                                 dut.commit0_exception, dut.commit1_exception,
+                                 dut.rn_stall, dut.issue_stall, dut.dispatch_ready,
+                                 dut.global_flush, dut.redirect_valid);
+                    end
+                    if (count >= 2) begin
+                        if (pass) begin
+                            $display("PASS_DUAL[%0d] inst0=%h inst1=%h", idx, inst0, inst1);
+                        end else begin
+                            $display("FAIL_DUAL[%0d] inst0=%h inst1=%h exp0(rd=%0d val=%h) got0(rd=%0d val=%h) exp1(rd=%0d val=%h) got1(rd=%0d val=%h)",
+                                     idx, inst0, inst1,
+                                     rd0, exp0, got_rd0, got_val0,
+                                     rd1, exp1, got_rd1, got_val1);
+                        end
+                        disable wait_dual_commit;
+                    end
+                end
+                if (!pass) begin
+                    $display("DBG_DUAL_TIMEOUT[%0d] if=%b ib_stall=%b ib=%b pre=%b rn=%b post=%b post0=%h post1=%h il0=%b il1=%b rs_cnt=%0d idx0=%0d idx1=%0d wb0=%b wb1=%b wb_exc0=%b wb_exc1=%b c0=%b c1=%b c0_exc=%b c1_exc=%b rn_stall=%b issue_stall=%b disp_ready=%b flush=%b redirect=%b",
+                             idx,
+                             dut.if_inst_valid, dut.ib_stall_if, dut.ib_valid, dut.pre_valid, dut.rn_valid, dut.post_valid,
+                             dut.post_inst_0, dut.post_inst_1, dut.post_illegal_0, dut.post_illegal_1,
+                             dut.u_issue.rs_count, dut.u_issue.issue_idx0, dut.u_issue.issue_idx1,
+                             dut.u_issue.wb0_valid, dut.u_issue.wb1_valid,
+                             dut.wb0_exception_exe, dut.wb1_exception_exe,
+                             dut.commit0_valid, dut.commit1_valid,
+                             dut.commit0_exception, dut.commit1_exception,
+                             dut.rn_stall, dut.issue_stall, dut.dispatch_ready,
+                             dut.global_flush, dut.redirect_valid);
+                end
+                $display("TIMEOUT_DUAL[%0d] inst0=%h inst1=%h", idx, inst0, inst1);
+            end
+
+            release dut.u_if.out_inst_0;
+            release dut.u_if.out_inst_1;
+            release dut.u_if.out_inst_valid;
+            release dut.u_if.out_inst_addr_0;
+            release dut.u_if.out_inst_addr_1;
+        end
+    endtask
+
     initial begin
         clk = 1'b0;
         forever #5 clk = ~clk;
@@ -551,6 +693,30 @@ module Top_tb;
         run_noeffect_test(32,
                  enc_i(12'd1, 5'd0, 3'b000, 5'd0, OPCODE_SYSTEM),
                  32'h0000_1000);
+
+        // Dual-issue: independent adds
+        run_dual_test(33,
+                 enc_r(7'b0000000, 5'd2, 5'd1, F3_ADD_SUB, 5'd3, OPCODE_OP),
+                 enc_r(7'b0000000, 5'd6, 5'd5, F3_ADD_SUB, 5'd4, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'd7, 5'd2, 32'd3, 32'd10,
+                 5'd4, 5'd5, 32'd11, 5'd6, 32'd22, 32'd33);
+
+        // Dual-issue: RAW dependency (rd0 -> rs1 of inst1)
+        run_dual_test(34,
+                 enc_r(7'b0000000, 5'd2, 5'd1, F3_ADD_SUB, 5'd7, OPCODE_OP),
+                 enc_r(7'b0000000, 5'd3, 5'd7, F3_ADD_SUB, 5'd8, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd7, 5'd1, 32'd5, 5'd2, 32'd6, 32'd11,
+                 5'd8, 5'd7, 32'd0, 5'd3, 32'd4, 32'd15);
+
+        // Dual-issue: WAW to same rd
+        run_dual_test(35,
+                 enc_r(7'b0000000, 5'd2, 5'd1, F3_ADD_SUB, 5'd9, OPCODE_OP),
+                 enc_r(7'b0000000, 5'd4, 5'd3, F3_ADD_SUB, 5'd9, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd9, 5'd1, 32'd5, 5'd2, 32'd6, 32'd11,
+                 5'd9, 5'd3, 32'd2, 5'd4, 32'd3, 32'd5);
 
         $finish;
     end
