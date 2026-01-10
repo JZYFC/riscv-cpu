@@ -95,13 +95,21 @@
 `define FP_OP_ADD   4'd0
 `define FP_OP_SUB   4'd1
 `define FP_OP_MUL   4'd2
-`define FP_OP_DIV   4'd3
-`define FP_OP_FMA   4'd4
-`define FP_OP_SQRT  4'd5
-`define FP_OP_CVT   4'd6
-`define FP_OP_MV    4'd7
-`define FP_OP_CMP   4'd8
-`define FP_OP_DUMMY 4'd15
+`define FP_OP_MADD   4'd3
+`define FP_OP_MSUB   4'd4
+`define FP_OP_NMSUB  4'd5
+`define FP_OP_NMADD   4'd6
+`define FP_OP_SUBABS    4'd7
+`define FP_OP_FEQ   4'd8
+`define FP_OP_FLT 4'd9
+
+`define ROUNDING_WIDTH_* 4
+`define RNE  4'd10 
+`define RTZ  4'd11 
+`define RDN  4'd12 
+`define RUP  4'd13 
+`define RMM  4'd14 
+`define DYN  4'd15 
 
 // ROB parameters
 `define ROB_SIZE      32
