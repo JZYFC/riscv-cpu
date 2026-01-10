@@ -102,14 +102,24 @@
 `define FP_OP_SUBABS    4'd7
 `define FP_OP_FEQ   4'd8
 `define FP_OP_FLT 4'd9
+// these micro-ops are not implemented yet
+`define FP_OP_DIV   4'd10
+`define FP_OP_FMA   4'd11
+`define FP_OP_SQRT  4'd12
+`define FP_OP_CVT   4'd13
+`define FP_OP_MV    4'd14
+`define FP_OP_CMP   4'd15
+`define FP_OP_DUMMY 4'd15
 
-`define ROUNDING_WIDTH_* 4
-`define RNE  4'd10 
-`define RTZ  4'd11 
-`define RDN  4'd12 
-`define RUP  4'd13 
-`define RMM  4'd14 
-`define DYN  4'd15 
+// Rounding mode (RISC-V frm encoding)
+`define ROUNDING_MODE_WIDTH 3
+
+`define ROUNDING_MODE_RNE 3'd0  // Round to Nearest, ties to Even
+`define ROUNDING_MODE_RTZ 3'd1  // Round towards Zero
+`define ROUNDING_MODE_RDN 3'd2  // Round Down (towards -inf)
+`define ROUNDING_MODE_RUP 3'd3  // Round Up (towards +inf)
+`define ROUNDING_MODE_RMM 3'd4  // Round to Nearest, ties to Max Magnitude
+`define ROUNDING_MODE_DYN 3'd7  // Dynamic (use frm CSR)
 
 // ROB parameters
 `define ROB_SIZE      32
