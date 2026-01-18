@@ -14,6 +14,7 @@ module Top_tb;
     localparam [6:0] OPCODE_BRANCH = 7'b1100011;
     localparam [6:0] OPCODE_JAL    = 7'b1101111;
     localparam [6:0] OPCODE_JALR   = 7'b1100111;
+    localparam [6:0] OPCODE_OP_FP  = 7'b1010011;
     localparam [6:0] OPCODE_LUI    = 7'b0110111;
     localparam [6:0] OPCODE_AUIPC  = 7'b0010111;
     localparam [6:0] OPCODE_MISC_MEM = 7'b0001111;
@@ -33,6 +34,7 @@ module Top_tb;
     localparam [2:0] F3_BGE     = 3'b101;
     localparam [2:0] F3_BLTU    = 3'b110;
     localparam [2:0] F3_BGEU    = 3'b111;
+    localparam [2:0] RM_RNE     = 3'b000;
 
     function [31:0] enc_r;
         input [6:0] funct7;
@@ -96,6 +98,14 @@ module Top_tb;
         end
     endtask
 
+    task write_fprf;
+        input [4:0] regnum;
+        input [31:0] value;
+        begin
+            dut.u_prf.float_prf[regnum] = value;
+        end
+    endtask
+
     task run_test;
         input integer idx;
         input [31:0] inst;
@@ -139,6 +149,61 @@ module Top_tb;
                     end
                 end
                 $display("TIMEOUT[%0d] inst=%h", idx, inst);
+            end
+
+            release dut.u_if.out_inst_0;
+            release dut.u_if.out_inst_1;
+            release dut.u_if.out_inst_valid;
+            release dut.u_if.out_inst_addr_0;
+            release dut.u_if.out_inst_addr_1;
+        end
+    endtask
+
+    task run_fp_test;
+        input integer idx;
+        input [31:0] inst;
+        input [31:0] pc;
+        input [4:0]  rd;
+        input [4:0]  rs1;
+        input [31:0] rs1_val;
+        input [4:0]  rs2;
+        input [31:0] rs2_val;
+        input [31:0] exp_val;
+        integer cycles;
+        begin
+            rst_n = 1'b0;
+            repeat (5) @(posedge clk);
+            rst_n = 1'b1;
+            @(posedge clk);
+            write_fprf(rs1, rs1_val);
+            write_fprf(rs2, rs2_val);
+
+            force dut.u_if.out_inst_0 = inst;
+            force dut.u_if.out_inst_1 = 32'h0000_0013;
+            force dut.u_if.out_inst_valid = 2'b01;
+            force dut.u_if.out_inst_addr_0 = pc;
+            force dut.u_if.out_inst_addr_1 = pc + 32'd4;
+
+            begin : wait_fp_commit
+                cycles = 0;
+                while (cycles < 200) begin
+                    @(posedge clk);
+                    #1;
+                    cycles = cycles + 1;
+                    if (dut.commit0_valid) begin
+                        if (!dut.commit0_is_float ||
+                            (dut.commit0_arch_rd !== rd) ||
+                            (dut.commit0_value !== exp_val)) begin
+                            $display("FAIL_FP[%0d] inst=%h rd=%0d exp=%h got_rd=%0d got=%h is_fp=%b",
+                                     idx, inst, rd, exp_val, dut.commit0_arch_rd, dut.commit0_value, dut.commit0_is_float);
+                        end else begin
+                            $display("PASS_FP[%0d] inst=%h rd=%0d val=%h",
+                                     idx, inst, rd, dut.commit0_value);
+                        end
+                        disable wait_fp_commit;
+                    end
+                end
+                $display("TIMEOUT_FP[%0d] inst=%h", idx, inst);
             end
 
             release dut.u_if.out_inst_0;
@@ -717,6 +782,24 @@ module Top_tb;
                  32'h0000_1000,
                  5'd9, 5'd1, 32'd5, 5'd2, 32'd6, 32'd11,
                  5'd9, 5'd3, 32'd2, 5'd4, 32'd3, 32'd5);
+
+        // FADD.S (1.0 + 2.0 = 3.0)
+        run_fp_test(36,
+                 enc_r(7'b0000000, 5'd2, 5'd1, RM_RNE, 5'd3, OPCODE_OP_FP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'h3F80_0000, 5'd2, 32'h4000_0000, 32'h4040_0000);
+
+        // FSUB.S (4.0 - 1.0 = 3.0)
+        run_fp_test(37,
+                 enc_r(7'b0000100, 5'd5, 5'd4, RM_RNE, 5'd6, OPCODE_OP_FP),
+                 32'h0000_1000,
+                 5'd6, 5'd4, 32'h4080_0000, 5'd5, 32'h3F80_0000, 32'h4040_0000);
+
+        // FMUL.S (2.0 * 0.5 = 1.0)
+        run_fp_test(38,
+                 enc_r(7'b0001000, 5'd8, 5'd7, RM_RNE, 5'd9, OPCODE_OP_FP),
+                 32'h0000_1000,
+                 5'd9, 5'd7, 32'h4000_0000, 5'd8, 32'h3F00_0000, 32'h3F80_0000);
 
         $finish;
     end

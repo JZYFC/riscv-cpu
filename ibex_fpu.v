@@ -106,8 +106,6 @@ module ibex_fpu(
     );
 
     always @(*) begin
-        reg [31:0] corner;
-        corner = 32'b0;
         result_o = 32'b0;
         exception_flag_o = 1'b0;
 

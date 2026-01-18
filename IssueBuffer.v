@@ -280,11 +280,46 @@ module IssueBuffer #(
     wire br1_is_return = br1_is_branch && (rs_branch_op[issue_idx1]==`BR_OP_JALR) &&
                          (rs_arch_rs1[issue_idx1] == 5'd1) && (rs_arch_rd[issue_idx1] == {`REG_ADDR_WIDTH{1'b0}});
 
+    // FP execute (combinational, 2-source only; no rs3 path yet).
+    wire fp_issue0 = (issue_idx0 != -1) && rs_valid[issue_idx0] && (rs_fu_sel[issue_idx0] == `FU_DEC_FP);
+    wire fp_issue1 = (issue_idx1 != -1) && rs_valid[issue_idx1] && (rs_fu_sel[issue_idx1] == `FU_DEC_FP);
+    wire [`DATA_WIDTH-1:0] fpu_a0 = fp_issue0 ? rs_rs1_val[issue_idx0] : {`DATA_WIDTH{1'b0}};
+    wire [`DATA_WIDTH-1:0] fpu_b0 = fp_issue0 ? rs_rs2_val[issue_idx0] : {`DATA_WIDTH{1'b0}};
+    wire [`DATA_WIDTH-1:0] fpu_a1 = fp_issue1 ? rs_rs1_val[issue_idx1] : {`DATA_WIDTH{1'b0}};
+    wire [`DATA_WIDTH-1:0] fpu_b1 = fp_issue1 ? rs_rs2_val[issue_idx1] : {`DATA_WIDTH{1'b0}};
+    wire [`FP_OP_WIDTH-1:0] fpu_op0 = fp_issue0 ? rs_fp_op[issue_idx0] : `FP_OP_DUMMY;
+    wire [`FP_OP_WIDTH-1:0] fpu_op1 = fp_issue1 ? rs_fp_op[issue_idx1] : `FP_OP_DUMMY;
+    wire [`ROUNDING_MODE_WIDTH-1:0] fpu_rm = `ROUNDING_MODE_RNE;
+    wire [`DATA_WIDTH-1:0] fpu_res0;
+    wire [`DATA_WIDTH-1:0] fpu_res1;
+    wire fpu_exc0;
+    wire fpu_exc1;
+
+    ibex_fpu u_fpu0 (
+        .A_i(fpu_a0),
+        .B_i(fpu_b0),
+        .C_i({`DATA_WIDTH{1'b0}}),
+        .opcode_i(fpu_op0),
+        .rounding_mode_i(fpu_rm),
+        .result_o(fpu_res0),
+        .exception_flag_o(fpu_exc0)
+    );
+
+    ibex_fpu u_fpu1 (
+        .A_i(fpu_a1),
+        .B_i(fpu_b1),
+        .C_i({`DATA_WIDTH{1'b0}}),
+        .opcode_i(fpu_op1),
+        .rounding_mode_i(fpu_rm),
+        .result_o(fpu_res1),
+        .exception_flag_o(fpu_exc1)
+    );
+
     // Candidate generation (issue0, issue1, divider)
     wire cand0_valid = (issue_idx0 != -1) && rs_valid[issue_idx0] &&
                        !(rs_fu_sel[issue_idx0]==`FU_DEC_MULDIV && rs_muldiv_op[issue_idx0][`ALU_OP_DIV]) &&
                        (rs_rd_tag[issue_idx0] != {`PREG_IDX_WIDTH{1'b0}});
-    wire [`DATA_WIDTH-1:0] cand0_val = select_result(rs_fu_sel[issue_idx0], alu_res_0, mul_res0, rs_muldiv_op[issue_idx0], csr_old0, link0);
+    wire [`DATA_WIDTH-1:0] cand0_val = select_result(rs_fu_sel[issue_idx0], alu_res_0, mul_res0, fpu_res0, rs_muldiv_op[issue_idx0], csr_old0, link0);
     wire [`PREG_IDX_WIDTH-1:0] cand0_tag = rs_rd_tag[issue_idx0];
     wire [`ROB_IDX_WIDTH-1:0]  cand0_rob = rs_rob_idx[issue_idx0];
     wire cand0_is_fp = rs_rd_is_fp[issue_idx0];
@@ -293,7 +328,7 @@ module IssueBuffer #(
     wire cand1_valid = (issue_idx1 != -1) && rs_valid[issue_idx1] &&
                        !(rs_fu_sel[issue_idx1]==`FU_DEC_MULDIV && rs_muldiv_op[issue_idx1][`ALU_OP_DIV]) &&
                        (rs_rd_tag[issue_idx1] != {`PREG_IDX_WIDTH{1'b0}});
-    wire [`DATA_WIDTH-1:0] cand1_val = select_result(rs_fu_sel[issue_idx1], alu_res_1, mul_res1, rs_muldiv_op[issue_idx1], csr_old1, link1);
+    wire [`DATA_WIDTH-1:0] cand1_val = select_result(rs_fu_sel[issue_idx1], alu_res_1, mul_res1, fpu_res1, rs_muldiv_op[issue_idx1], csr_old1, link1);
     wire [`PREG_IDX_WIDTH-1:0] cand1_tag = rs_rd_tag[issue_idx1];
     wire [`ROB_IDX_WIDTH-1:0]  cand1_rob = rs_rob_idx[issue_idx1];
     wire cand1_is_fp = rs_rd_is_fp[issue_idx1];
@@ -399,6 +434,7 @@ module IssueBuffer #(
         input [`FU_DEC_WIDTH-1:0] fu_sel;
         input [`DATA_WIDTH-1:0]   int_res;
         input [`DATA_WIDTH-1:0]   mul_res;
+        input [`DATA_WIDTH-1:0]   fp_res;
         input [`ALU_OP_WIDTH-1:0] muldiv_op;
         input [`DATA_WIDTH-1:0]   csr_old;
         input [`DATA_WIDTH-1:0]   link_res;
@@ -409,7 +445,7 @@ module IssueBuffer #(
             `FU_DEC_BRANCH:   select_result = link_res;
             `FU_DEC_LSU:      select_result = {`DATA_WIDTH{1'b0}};
             `FU_DEC_SYSTEM:   select_result = csr_old;
-            `FU_DEC_FP:       select_result = {`DATA_WIDTH{1'b0}};
+            `FU_DEC_FP:       select_result = fp_res;
             default:          select_result = {`DATA_WIDTH{1'b0}};
         endcase
     end
