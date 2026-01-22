@@ -192,6 +192,7 @@ module IssueBuffer #(
 
     reg [RS_DEPTH:0] rs_count;
     reg [AGE_W-1:0] age_counter;
+    integer issue_idx0, issue_idx1;
 
     reg [`DATA_WIDTH-1:0] csr_file [0:4095];
 
@@ -334,6 +335,17 @@ module IssueBuffer #(
     wire cand1_is_fp = rs_rd_is_fp[issue_idx1];
     wire cand1_exc   = rs_illegal[issue_idx1];
 
+    reg [`PREG_IDX_WIDTH-1:0] wb0_dest_tag, wb1_dest_tag, div_dest_tag;
+    reg wb0_dest_valid, wb1_dest_valid, div_dest_valid;
+    reg wb0_dest_is_fp, wb1_dest_is_fp, div_dest_is_fp;
+    reg [`ROB_IDX_WIDTH-1:0] div_rob_idx;
+    reg                      div_exception;
+    reg                      div_busy;
+    reg [3:0]                div_counter;
+    reg [`DATA_WIDTH-1:0]    div_value;
+    reg                      div_done;
+    integer pick;
+
     wire cand2_valid = div_done && div_dest_valid;
     wire [`DATA_WIDTH-1:0] cand2_val = div_value;
     wire [`PREG_IDX_WIDTH-1:0] cand2_tag = div_dest_tag;
@@ -344,7 +356,6 @@ module IssueBuffer #(
     // Ready mask and selection
     reg [RS_DEPTH-1:0] ready_mask;
     integer rm;
-    integer issue_idx0, issue_idx1;
     integer best_age0, best_age1;
     always @(*) begin
         ready_mask = {RS_DEPTH{1'b0}};
@@ -451,16 +462,6 @@ module IssueBuffer #(
     end
     endfunction
 
-    reg [`PREG_IDX_WIDTH-1:0] wb0_dest_tag, wb1_dest_tag, div_dest_tag;
-    reg wb0_dest_valid, wb1_dest_valid, div_dest_valid;
-    reg wb0_dest_is_fp, wb1_dest_is_fp, div_dest_is_fp;
-    reg [`ROB_IDX_WIDTH-1:0] div_rob_idx;
-    reg                      div_exception;
-    reg                      div_busy;
-    reg [3:0]                div_counter;
-    reg [`DATA_WIDTH-1:0]    div_value;
-    reg                      div_done;
-
     always @(*) begin
         wb0_valid = 1'b0; wb1_valid = 1'b0;
         wb0_rob_idx = {`ROB_IDX_WIDTH{1'b0}}; wb1_rob_idx = {`ROB_IDX_WIDTH{1'b0}};
@@ -547,7 +548,6 @@ module IssueBuffer #(
     integer enq_cnt;
     integer found_idx0;
     integer found_idx1;
-    integer pick;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

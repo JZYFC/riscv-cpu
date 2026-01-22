@@ -471,6 +471,7 @@ wire rs2_tag_valid1 = in_inst_valid[1] && !rs2_dep0 &&
                      (in_rs2_is_fp_1 ? fp_map_valid[in_rs2_1] : int_map_valid[in_rs2_1]) &&
                      (!(~in_rs2_is_fp_1 && (in_rs2_1 == {`REG_ADDR_WIDTH{1'b0}})));
 
+wire [`ROB_IDX_WIDTH-1:0] rob_commit0_idx, rob_commit1_idx;
 assign commit0_rob_idx = rob_commit0_idx;
 assign commit1_rob_idx = rob_commit1_idx;
 
@@ -483,7 +484,6 @@ wire [1:0] int_push_count = commit0_push_int + commit1_push_int;
 wire [1:0] fp_push_count  = commit0_push_fp  + commit1_push_fp;
 
 // ROB instance
-wire [`ROB_IDX_WIDTH-1:0] rob_commit0_idx, rob_commit1_idx;
 ROB #(.PREG_IDX_WIDTH(`PREG_IDX_WIDTH)) u_rob (
     .clk(clk),
     .rst_n(rst_n),
