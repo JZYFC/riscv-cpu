@@ -65,6 +65,11 @@ wire [`BP_GHR_BITS-1:0] if_pred_hist_0, if_pred_hist_1;
 wire ib_stall_if;
 wire issue_stall;
 wire dispatch_ready = ~rn_stall & ~issue_stall;
+wire ic_req;
+wire [`INST_ADDR_WIDTH-1:0] ic_paddr;
+wire [127:0] ic_rdata_line;
+wire ic_valid;
+wire ic_stall;
 wire issue_bp_update0_valid, issue_bp_update1_valid;
 wire [`INST_ADDR_WIDTH-1:0] issue_bp_update0_pc, issue_bp_update1_pc;
 wire issue_bp_update0_taken, issue_bp_update1_taken;
@@ -94,6 +99,11 @@ IF u_if (
     .bp_update1_hist(issue_bp_update1_hist),
     .bp_update1_is_call(issue_bp_update1_is_call),
     .bp_update1_is_return(issue_bp_update1_is_return),
+    .ic_req(ic_req),
+    .ic_paddr(ic_paddr),
+    .ic_rdata_line(ic_rdata_line),
+    .ic_valid(ic_valid),
+    .ic_stall(ic_stall),
     .out_inst_addr_0(if_inst_addr_0),
     .out_inst_addr_1(if_inst_addr_1),
     .out_inst_0(if_inst_0),
@@ -105,6 +115,80 @@ IF u_if (
     .out_pred_taken_1(if_pred_taken_1),
     .out_pred_target_1(if_pred_target_1),
     .out_pred_hist_1(if_pred_hist_1)
+);
+
+// ----------------------------
+// I-Cache + Memory (D side stubbed for now)
+// ----------------------------
+wire         ic_mem_req;
+wire         ic_mem_we;
+wire [31:0]  ic_mem_addr;
+wire [127:0] ic_mem_wdata;
+wire [127:0] ic_mem_rdata;
+wire         ic_mem_ready;
+
+wire         d_mem_req;
+wire         d_mem_we;
+wire [31:0]  d_mem_addr;
+wire [127:0] d_mem_wdata;
+wire [127:0] d_mem_rdata;
+wire         d_mem_ready;
+
+wire         mem_req;
+wire         mem_we;
+wire [31:0]  mem_addr;
+wire [127:0] mem_wdata;
+wire [127:0] mem_rdata;
+wire         mem_ready;
+
+ICache u_icache (
+    .clk(clk),
+    .rst_n(rst_n),
+    .paddr(ic_paddr),
+    .req(ic_req),
+    .rdata_line(ic_rdata_line),
+    .valid_out(ic_valid),
+    .stall_cpu(ic_stall),
+    .mem_req(ic_mem_req),
+    .mem_we(ic_mem_we),
+    .mem_addr(ic_mem_addr),
+    .mem_wdata(ic_mem_wdata),
+    .mem_rdata(ic_mem_rdata),
+    .mem_ready(ic_mem_ready)
+);
+
+MemArbiter u_memarb (
+    .clk(clk),
+    .rst_n(rst_n),
+    .i_req(ic_mem_req),
+    .i_we(ic_mem_we),
+    .i_addr(ic_mem_addr),
+    .i_wdata(ic_mem_wdata),
+    .i_rdata(ic_mem_rdata),
+    .i_ready(ic_mem_ready),
+    .d_req(d_mem_req),
+    .d_we(d_mem_we),
+    .d_addr(d_mem_addr),
+    .d_wdata(d_mem_wdata),
+    .d_rdata(d_mem_rdata),
+    .d_ready(d_mem_ready),
+    .mem_req(mem_req),
+    .mem_we(mem_we),
+    .mem_addr(mem_addr),
+    .mem_wdata(mem_wdata),
+    .mem_rdata(mem_rdata),
+    .mem_ready(mem_ready)
+);
+
+MainMemory u_mainmem (
+    .clk(clk),
+    .rst_n(rst_n),
+    .mem_req(mem_req),
+    .mem_we(mem_we),
+    .mem_addr(mem_addr),
+    .mem_wdata(mem_wdata),
+    .mem_rdata(mem_rdata),
+    .mem_ready(mem_ready)
 );
 
 // ----------------------------
@@ -284,6 +368,22 @@ wire [`DATA_WIDTH-1:0] wb0_value_exe;
 wire [`DATA_WIDTH-1:0] wb1_value_exe;
 wire wb0_exception_exe;
 wire wb1_exception_exe;
+wire lsu_valid;
+wire [31:0] lsu_addr;
+wire [31:0] lsu_wdata;
+wire [`MEM_OP_WIDTH-1:0] lsu_mem_op;
+wire lsu_mem_is_load;
+wire lsu_mem_unsigned;
+wire [`ROB_IDX_WIDTH-1:0] lsu_rob_idx;
+wire [`PREG_IDX_WIDTH-1:0] lsu_rd_tag;
+wire lsu_rd_is_fp;
+wire lsu_busy;
+wire lsu_wb_valid;
+wire [`DATA_WIDTH-1:0] lsu_wb_value;
+wire [`ROB_IDX_WIDTH-1:0] lsu_wb_rob_idx;
+wire [`PREG_IDX_WIDTH-1:0] lsu_wb_dest_tag;
+wire lsu_wb_dest_is_fp;
+wire lsu_wb_exception;
 
 RegRename u_regrename (
     .clk(clk),
@@ -763,6 +863,22 @@ IssueBuffer u_issue (
     .wb1_rob_idx(wb1_rob_idx_exe),
     .wb1_value(wb1_value_exe),
     .wb1_exception(wb1_exception_exe),
+    .lsu_valid(lsu_valid),
+    .lsu_addr(lsu_addr),
+    .lsu_wdata(lsu_wdata),
+    .lsu_mem_op(lsu_mem_op),
+    .lsu_mem_is_load(lsu_mem_is_load),
+    .lsu_mem_unsigned(lsu_mem_unsigned),
+    .lsu_rob_idx(lsu_rob_idx),
+    .lsu_rd_tag(lsu_rd_tag),
+    .lsu_rd_is_fp(lsu_rd_is_fp),
+    .lsu_busy(lsu_busy),
+    .lsu_wb_valid(lsu_wb_valid),
+    .lsu_wb_value(lsu_wb_value),
+    .lsu_wb_rob_idx(lsu_wb_rob_idx),
+    .lsu_wb_dest_tag(lsu_wb_dest_tag),
+    .lsu_wb_dest_is_fp(lsu_wb_dest_is_fp),
+    .lsu_wb_exception(lsu_wb_exception),
     .redirect_valid(redirect_valid),
     .redirect_target(redirect_target),
     .redirect_rob_idx(redirect_rob_idx),
@@ -800,6 +916,37 @@ IssueBuffer u_issue (
     .f_wr_addr1(prf_f_wr_addr1),
     .f_wr_data1(prf_f_wr_data1),
     .f_wr_we1(prf_f_wr_we1)
+);
+
+// ----------------------------
+// LSU (D-Cache + TLB)
+// ----------------------------
+LSU u_lsu (
+    .clk(clk),
+    .rst_n(rst_n),
+    .flush(global_flush),
+    .valid_in(lsu_valid),
+    .addr(lsu_addr),
+    .wdata(lsu_wdata),
+    .mem_op(lsu_mem_op),
+    .mem_is_load(lsu_mem_is_load),
+    .mem_unsigned(lsu_mem_unsigned),
+    .rob_idx_in(lsu_rob_idx),
+    .rd_tag_in(lsu_rd_tag),
+    .rd_is_fp_in(lsu_rd_is_fp),
+    .busy(lsu_busy),
+    .wb_valid(lsu_wb_valid),
+    .wb_value(lsu_wb_value),
+    .wb_rob_idx(lsu_wb_rob_idx),
+    .wb_dest_tag(lsu_wb_dest_tag),
+    .wb_dest_is_fp(lsu_wb_dest_is_fp),
+    .wb_exception(lsu_wb_exception),
+    .mem_req(d_mem_req),
+    .mem_we(d_mem_we),
+    .mem_addr(d_mem_addr),
+    .mem_wdata(d_mem_wdata),
+    .mem_rdata(d_mem_rdata),
+    .mem_ready(d_mem_ready)
 );
 
 endmodule

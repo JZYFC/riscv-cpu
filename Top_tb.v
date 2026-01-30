@@ -17,6 +17,8 @@ module Top_tb;
     localparam [6:0] OPCODE_OP_FP  = 7'b1010011;
     localparam [6:0] OPCODE_LUI    = 7'b0110111;
     localparam [6:0] OPCODE_AUIPC  = 7'b0010111;
+    localparam [6:0] OPCODE_LOAD   = 7'b0000011;
+    localparam [6:0] OPCODE_STORE  = 7'b0100011;
     localparam [6:0] OPCODE_MISC_MEM = 7'b0001111;
     localparam [6:0] OPCODE_SYSTEM   = 7'b1110011;
 
@@ -76,6 +78,17 @@ module Top_tb;
         input [6:0]  opcode;
         begin
             enc_i = {imm, rs1, funct3, rd, opcode};
+        end
+    endfunction
+
+    function [31:0] enc_s;
+        input [11:0] imm;
+        input [4:0]  rs2;
+        input [4:0]  rs1;
+        input [2:0]  funct3;
+        input [6:0]  opcode;
+        begin
+            enc_s = {imm[11:5], rs2, rs1, funct3, imm[4:0], opcode};
         end
     endfunction
 
@@ -564,7 +577,11 @@ module Top_tb;
         forever #5 clk = ~clk;
     end
 
+    // TAG: Test case start
     initial begin
+        // Initialize a memory line for load test (addr 0x0000_0040 -> idx 0x04)
+        dut.u_mainmem.ram[8'h04] = 128'h00000000_00000000_00000000_DEADBEEF;
+
         // ADD
         run_test(0,
                  enc_r(7'b0000000, 5'd2, 5'd1, F3_ADD_SUB, 5'd3, OPCODE_OP),
@@ -691,76 +708,82 @@ module Top_tb;
                  32'h0000_1000,
                  5'd23, 5'd0, 32'd0, 5'd0, 32'd0, 32'h0001_3000);
 
+        // LW (from addr 0x0000_0040 -> 0xDEADBEEF)
+        run_test(21,
+                 enc_i(12'h000, 5'd1, 3'b010, 5'd24, OPCODE_LOAD),
+                 32'h0000_1000,
+                 5'd24, 5'd1, 32'h0000_0040, 5'd0, 32'd0, 32'hDEAD_BEEF);
+
         // BEQ taken -> redirect to PC+8
-        run_redirect_test(21,
+        run_redirect_test(22,
                  enc_b(13'd8, 5'd2, 5'd1, F3_BEQ, OPCODE_BRANCH),
                  32'h0000_1000,
                  5'd1, 32'd5, 5'd2, 32'd5, 32'h0000_1008);
 
         // BNE taken
-        run_redirect_test(22,
+        run_redirect_test(23,
                  enc_b(13'd8, 5'd2, 5'd1, F3_BNE, OPCODE_BRANCH),
                  32'h0000_1000,
                  5'd1, 32'd5, 5'd2, 32'd7, 32'h0000_1008);
 
         // BLT taken
-        run_redirect_test(23,
+        run_redirect_test(24,
                  enc_b(13'd8, 5'd2, 5'd1, F3_BLT, OPCODE_BRANCH),
                  32'h0000_1000,
                  5'd1, 32'hFFFF_FFFF, 5'd2, 32'd1, 32'h0000_1008);
 
         // BGE taken
-        run_redirect_test(24,
+        run_redirect_test(25,
                  enc_b(13'd8, 5'd2, 5'd1, F3_BGE, OPCODE_BRANCH),
                  32'h0000_1000,
                  5'd1, 32'd1, 5'd2, 32'hFFFF_FFFF, 32'h0000_1008);
 
         // BLTU taken
-        run_redirect_test(25,
+        run_redirect_test(26,
                  enc_b(13'd8, 5'd2, 5'd1, F3_BLTU, OPCODE_BRANCH),
                  32'h0000_1000,
                  5'd1, 32'd1, 5'd2, 32'd2, 32'h0000_1008);
 
         // BGEU taken
-        run_redirect_test(26,
+        run_redirect_test(27,
                  enc_b(13'd8, 5'd2, 5'd1, F3_BGEU, OPCODE_BRANCH),
                  32'h0000_1000,
                  5'd1, 32'hFFFF_FFFF, 5'd2, 32'd1, 32'h0000_1008);
 
         // JAL -> redirect to PC+16
-        run_redirect_link_test(27,
+        run_redirect_link_test(28,
                  enc_j(21'd16, 5'd1, OPCODE_JAL),
                  32'h0000_1000,
                  5'd0, 32'd0, 5'd0, 32'd0, 32'h0000_1010, 32'h0000_1004);
 
         // JALR -> redirect to (rs1+4)&~1
-        run_redirect_link_test(28,
+        run_redirect_link_test(29,
                  enc_i(12'd4, 5'd5, F3_ADD_SUB, 5'd1, OPCODE_JALR),
                  32'h0000_1000,
                  5'd5, 32'h0000_2000, 5'd0, 32'd0, 32'h0000_2004, 32'h0000_1004);
 
         // FENCE
-        run_noeffect_test(29,
+        run_noeffect_test(30,
                  enc_i(12'd0, 5'd0, 3'b000, 5'd0, OPCODE_MISC_MEM),
                  32'h0000_1000);
 
         // FENCE.I
-        run_noeffect_test(30,
+        run_noeffect_test(31,
                  enc_i(12'd0, 5'd0, 3'b001, 5'd0, OPCODE_MISC_MEM),
                  32'h0000_1000);
 
         // ECALL
-        run_noeffect_test(31,
+        run_noeffect_test(32,
                  enc_i(12'd0, 5'd0, 3'b000, 5'd0, OPCODE_SYSTEM),
                  32'h0000_1000);
 
         // EBREAK
-        run_noeffect_test(32,
+        run_noeffect_test(33,
                  enc_i(12'd1, 5'd0, 3'b000, 5'd0, OPCODE_SYSTEM),
                  32'h0000_1000);
 
         // Dual-issue: independent adds
-        run_dual_test(33,
+        run_dual_test(34,
                  enc_r(7'b0000000, 5'd2, 5'd1, F3_ADD_SUB, 5'd3, OPCODE_OP),
                  enc_r(7'b0000000, 5'd6, 5'd5, F3_ADD_SUB, 5'd4, OPCODE_OP),
                  32'h0000_1000,
@@ -768,7 +791,7 @@ module Top_tb;
                  5'd4, 5'd5, 32'd11, 5'd6, 32'd22, 32'd33);
 
         // Dual-issue: RAW dependency (rd0 -> rs1 of inst1)
-        run_dual_test(34,
+        run_dual_test(35,
                  enc_r(7'b0000000, 5'd2, 5'd1, F3_ADD_SUB, 5'd7, OPCODE_OP),
                  enc_r(7'b0000000, 5'd3, 5'd7, F3_ADD_SUB, 5'd8, OPCODE_OP),
                  32'h0000_1000,
@@ -776,7 +799,7 @@ module Top_tb;
                  5'd8, 5'd7, 32'd0, 5'd3, 32'd4, 32'd15);
 
         // Dual-issue: WAW to same rd
-        run_dual_test(35,
+        run_dual_test(36,
                  enc_r(7'b0000000, 5'd2, 5'd1, F3_ADD_SUB, 5'd9, OPCODE_OP),
                  enc_r(7'b0000000, 5'd4, 5'd3, F3_ADD_SUB, 5'd9, OPCODE_OP),
                  32'h0000_1000,
@@ -784,19 +807,19 @@ module Top_tb;
                  5'd9, 5'd3, 32'd2, 5'd4, 32'd3, 32'd5);
 
         // FADD.S (1.0 + 2.0 = 3.0)
-        run_fp_test(36,
+        run_fp_test(37,
                  enc_r(7'b0000000, 5'd2, 5'd1, RM_RNE, 5'd3, OPCODE_OP_FP),
                  32'h0000_1000,
                  5'd3, 5'd1, 32'h3F80_0000, 5'd2, 32'h4000_0000, 32'h4040_0000);
 
         // FSUB.S (4.0 - 1.0 = 3.0)
-        run_fp_test(37,
+        run_fp_test(38,
                  enc_r(7'b0000100, 5'd5, 5'd4, RM_RNE, 5'd6, OPCODE_OP_FP),
                  32'h0000_1000,
                  5'd6, 5'd4, 32'h4080_0000, 5'd5, 32'h3F80_0000, 32'h4040_0000);
 
         // FMUL.S (2.0 * 0.5 = 1.0)
-        run_fp_test(38,
+        run_fp_test(39,
                  enc_r(7'b0001000, 5'd8, 5'd7, RM_RNE, 5'd9, OPCODE_OP_FP),
                  32'h0000_1000,
                  5'd9, 5'd7, 32'h4000_0000, 5'd8, 32'h3F00_0000, 32'h3F80_0000);

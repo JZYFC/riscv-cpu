@@ -129,3 +129,14 @@
 `define INT_PREG_NUM   64
 `define FP_PREG_NUM    64
 `define PREG_IDX_WIDTH 6   // log2(max(INT_PREG_NUM, FP_PREG_NUM))
+// 虚拟内存 Sv32 参数
+`define PAGE_SIZE       4096       // 4KB 页大小
+`define PAGE_OFFSET_BITS 12        // 偏移量位宽
+`define VPN_WIDTH       20         // 虚拟页号 (32 - 12)
+`define PPN_WIDTH       20         // 物理页号 (Sv32 PPN也是20位，简化处理)
+
+// Cache 参数 (2路组相联，每块16字节)
+`define CACHE_LINE_SIZE 128        // 128-bit (16 Bytes) 数据块
+`define CACHE_INDEX_BITS 6         // 64组 (Sets)
+`define CACHE_TAG_BITS  (32 - `CACHE_INDEX_BITS - 4) // 32 - 6 - 4(offset) = 22位 Tag
+`define CACHE_WAY_NUM   2          // 2路
