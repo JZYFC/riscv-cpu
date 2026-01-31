@@ -4,7 +4,7 @@ module Cache (
     input wire clk,
     input wire rst_n,
 
-    // CPU 侧接口
+    // CPU Interface
     input wire [31:0]  paddr,
     input wire         req,
     input wire         we,
@@ -14,7 +14,7 @@ module Cache (
     output reg         valid_out,
     output wire        stall_cpu,
 
-    //主存接口
+    // Main mem Interface
     output reg         mem_req,
     output reg         mem_we,
     output reg [31:0]  mem_addr,
@@ -23,22 +23,22 @@ module Cache (
     input  wire        mem_ready
 );
 
-    //参数
+    // Parameters
     localparam SETS = 1 << `CACHE_INDEX_BITS;
     localparam TAG_BITS = `CACHE_TAG_BITS;
     
-    //地址分解 
+    // Address Breakdown
     wire [TAG_BITS-1:0]      tag;
     wire [`CACHE_INDEX_BITS-1:0] index;
     wire [3:0]               offset;
 
-    // 高位 [31 : 10]
+    // High bits [31 : 10]
     assign tag   = paddr[31 : 32-TAG_BITS]; 
     
-    // 中间位 [9 : 4] 
+    // Mid bits [9 : 4] 
     assign index = paddr[4 + `CACHE_INDEX_BITS - 1 : 4]; 
     
-    // 低位 [3 : 0]
+    // Low bits [3 : 0]
     assign offset= paddr[3:0];
 
     reg [127:0] data_way0 [0:SETS-1];
@@ -66,7 +66,7 @@ module Cache (
     assign saved_tag0 = raw_tag0[TAG_BITS-1:0];
     assign saved_tag1 = raw_tag1[TAG_BITS-1:0];
 
-    // Hit 逻辑
+    // Hit Logic
     wire hit0;
     wire hit1;
     wire hit;
@@ -75,14 +75,14 @@ module Cache (
     assign hit1 = valid1 && (saved_tag1 == tag);
     assign hit  = (hit0 || hit1) && req;
 
-    // 读数据选择
+    // Select by data
     reg [127:0] selected_line;
     always @(*) begin
         if (hit1) selected_line = data_way1[index];
         else      selected_line = data_way0[index];
     end
     
-    // 提取32位字
+    // Read 32 bit word
     always @(*) begin
         case(offset[3:2])
             2'b00: rdata = selected_line[31:0];
@@ -95,7 +95,7 @@ module Cache (
     localparam IDLE = 0, REFILL = 1, WRITEBACK = 2;
     reg [1:0] state;
     
-    // 替换策略
+    // Replacement Policy
     wire victim_way;
     wire victim_dirty;
     wire [TAG_BITS-1:0] victim_tag;
@@ -122,24 +122,44 @@ module Cache (
                     if (req) begin
                         if (hit) begin
                             valid_out <= 1;
-                            // 更新 LRU
+                            // Update LRU
                             lru[index] <= hit0 ? 1'b1 : 1'b0;
 
-                            // 处理写命中 (Write Hit)
+                            // Handle Write Hit
                             if (we) begin
                                 if (hit0) begin
-                                    // 更新 Dirty 位
+                                    // Update Dirty bit
                                     temp_tag = tag_way0[index];
                                     temp_tag[TAG_BITS+1] = 1'b1;
                                     tag_way0[index] <= temp_tag;
 
-                                    // 数据写入：读-改-写
+                                    // Handle Write Data: Read-Modify-Write
                                     temp_data = data_way0[index];
                                     case(offset[3:2])
-                                        2'b00: temp_data[31:0] = wdata;
-                                        2'b01: temp_data[63:32] = wdata;
-                                        2'b10: temp_data[95:64] = wdata;
-                                        2'b11: temp_data[127:96] = wdata;
+                                        2'b00: begin
+                                            if (wstrb[0]) temp_data[7:0]   = wdata[7:0];
+                                            if (wstrb[1]) temp_data[15:8]  = wdata[15:8];
+                                            if (wstrb[2]) temp_data[23:16] = wdata[23:16];
+                                            if (wstrb[3]) temp_data[31:24] = wdata[31:24];
+                                        end
+                                        2'b01: begin
+                                            if (wstrb[0]) temp_data[39:32] = wdata[7:0];
+                                            if (wstrb[1]) temp_data[47:40] = wdata[15:8];
+                                            if (wstrb[2]) temp_data[55:48] = wdata[23:16];
+                                            if (wstrb[3]) temp_data[63:56] = wdata[31:24];
+                                        end
+                                        2'b10: begin
+                                            if (wstrb[0]) temp_data[71:64] = wdata[7:0];
+                                            if (wstrb[1]) temp_data[79:72] = wdata[15:8];
+                                            if (wstrb[2]) temp_data[87:80] = wdata[23:16];
+                                            if (wstrb[3]) temp_data[95:88] = wdata[31:24];
+                                        end
+                                        2'b11: begin
+                                            if (wstrb[0]) temp_data[103:96]  = wdata[7:0];
+                                            if (wstrb[1]) temp_data[111:104] = wdata[15:8];
+                                            if (wstrb[2]) temp_data[119:112] = wdata[23:16];
+                                            if (wstrb[3]) temp_data[127:120] = wdata[31:24];
+                                        end
                                     endcase
                                     data_way0[index] <= temp_data;
                                 end else begin
@@ -150,10 +170,30 @@ module Cache (
 
                                     temp_data = data_way1[index];
                                     case(offset[3:2])
-                                        2'b00: temp_data[31:0] = wdata;
-                                        2'b01: temp_data[63:32] = wdata;
-                                        2'b10: temp_data[95:64] = wdata;
-                                        2'b11: temp_data[127:96] = wdata;
+                                        2'b00: begin
+                                            if (wstrb[0]) temp_data[7:0]   = wdata[7:0];
+                                            if (wstrb[1]) temp_data[15:8]  = wdata[15:8];
+                                            if (wstrb[2]) temp_data[23:16] = wdata[23:16];
+                                            if (wstrb[3]) temp_data[31:24] = wdata[31:24];
+                                        end
+                                        2'b01: begin
+                                            if (wstrb[0]) temp_data[39:32] = wdata[7:0];
+                                            if (wstrb[1]) temp_data[47:40] = wdata[15:8];
+                                            if (wstrb[2]) temp_data[55:48] = wdata[23:16];
+                                            if (wstrb[3]) temp_data[63:56] = wdata[31:24];
+                                        end
+                                        2'b10: begin
+                                            if (wstrb[0]) temp_data[71:64] = wdata[7:0];
+                                            if (wstrb[1]) temp_data[79:72] = wdata[15:8];
+                                            if (wstrb[2]) temp_data[87:80] = wdata[23:16];
+                                            if (wstrb[3]) temp_data[95:88] = wdata[31:24];
+                                        end
+                                        2'b11: begin
+                                            if (wstrb[0]) temp_data[103:96]  = wdata[7:0];
+                                            if (wstrb[1]) temp_data[111:104] = wdata[15:8];
+                                            if (wstrb[2]) temp_data[119:112] = wdata[23:16];
+                                            if (wstrb[3]) temp_data[127:120] = wdata[31:24];
+                                        end
                                     endcase
                                     data_way1[index] <= temp_data;
                                 end
@@ -162,14 +202,14 @@ module Cache (
                             // Miss
                             if (victim_dirty) begin
                                 state <= WRITEBACK;
-                                // 修正: 地址拼接
+                                // Fix: address concatenation
                                 mem_addr <= {victim_tag, index, 4'b0000};
                                 mem_wdata <= victim_way ? data_way1[index] : data_way0[index];
                                 mem_req <= 1;
                                 mem_we <= 1;
                             end else begin
                                 state <= REFILL;
-                                // 修正: 地址拼接
+                                // Fix: address concatenation
                                 mem_addr <= {paddr[31:4], 4'b0000};
                                 mem_req <= 1;
                                 mem_we <= 0;
@@ -193,13 +233,45 @@ module Cache (
                 REFILL: begin
                     if (mem_ready) begin
                         state <= IDLE;
+                        
+                        // Fix Bug 2: Merge pending store data if this is a write miss
+                        temp_data = mem_rdata;
+                        if (we) begin
+                            case(offset[3:2])
+                                2'b00: begin
+                                    if (wstrb[0]) temp_data[7:0]   = wdata[7:0];
+                                    if (wstrb[1]) temp_data[15:8]  = wdata[15:8];
+                                    if (wstrb[2]) temp_data[23:16] = wdata[23:16];
+                                    if (wstrb[3]) temp_data[31:24] = wdata[31:24];
+                                end
+                                2'b01: begin
+                                    if (wstrb[0]) temp_data[39:32] = wdata[7:0];
+                                    if (wstrb[1]) temp_data[47:40] = wdata[15:8];
+                                    if (wstrb[2]) temp_data[55:48] = wdata[23:16];
+                                    if (wstrb[3]) temp_data[63:56] = wdata[31:24];
+                                end
+                                2'b10: begin
+                                    if (wstrb[0]) temp_data[71:64] = wdata[7:0];
+                                    if (wstrb[1]) temp_data[79:72] = wdata[15:8];
+                                    if (wstrb[2]) temp_data[87:80] = wdata[23:16];
+                                    if (wstrb[3]) temp_data[95:88] = wdata[31:24];
+                                end
+                                2'b11: begin
+                                    if (wstrb[0]) temp_data[103:96]  = wdata[7:0];
+                                    if (wstrb[1]) temp_data[111:104] = wdata[15:8];
+                                    if (wstrb[2]) temp_data[119:112] = wdata[23:16];
+                                    if (wstrb[3]) temp_data[127:120] = wdata[31:24];
+                                end
+                            endcase
+                        end
+
                         if (victim_way == 0) begin
-                            data_way0[index] <= mem_rdata;
-                            // Set: Dirty=0, Valid=1, Tag=current tag
-                            tag_way0[index]  <= {1'b0, 1'b1, tag};
+                            data_way0[index] <= temp_data;
+                            // Set: Dirty=we, Valid=1, Tag=current tag
+                            tag_way0[index]  <= {we, 1'b1, tag};
                         end else begin
-                            data_way1[index] <= mem_rdata;
-                            tag_way1[index]  <= {1'b0, 1'b1, tag};
+                            data_way1[index] <= temp_data;
+                            tag_way1[index]  <= {we, 1'b1, tag};
                         end
                     end else begin
                         mem_req <= 1;

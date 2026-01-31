@@ -120,6 +120,11 @@ function automatic [`REG_ADDR_WIDTH-1:0] decode_rs1;
             OPCODE_LUI,
             OPCODE_AUIPC,
             OPCODE_JAL: decode_rs1 = {`REG_ADDR_WIDTH{1'b0}};
+            OPCODE_SYSTEM: begin
+                // CSR immediate variants encode zimm in rs1 field; treat as x0 to avoid false deps.
+                if (inst[14]) decode_rs1 = {`REG_ADDR_WIDTH{1'b0}};
+                else          decode_rs1 = inst[19:15];
+            end
             default:    decode_rs1 = inst[19:15];
         endcase
     end
@@ -169,8 +174,12 @@ function automatic [`DATA_WIDTH-1:0] decode_imm;
             OPCODE_OP_IMM,
             OPCODE_LOAD,
             OPCODE_JALR,
-            OPCODE_SYSTEM,
             OPCODE_MISC_MEM: imm = {{20{inst[31]}}, inst[31:20]}; // I-type
+            OPCODE_SYSTEM: begin
+                // CSR immediate uses zimm in rs1 field; other system ops don't need imm here.
+                if (inst[14]) imm = {{27{1'b0}}, inst[19:15]};
+                else          imm = {`DATA_WIDTH{1'b0}};
+            end
             OPCODE_STORE:    imm = {{20{inst[31]}}, inst[31:25], inst[11:7]}; // S-type
             OPCODE_BRANCH:   imm = {{19{inst[31]}}, inst[31], inst[7], inst[30:25], inst[11:8], 1'b0}; // B-type
             OPCODE_LUI,
@@ -197,8 +206,8 @@ function automatic decode_use_imm;
             OPCODE_JALR,
             OPCODE_LUI,
             OPCODE_AUIPC,
-            OPCODE_SYSTEM,
             OPCODE_MISC_MEM: decode_use_imm = 1'b1;
+            OPCODE_SYSTEM:   decode_use_imm = inst[14]; // CSR immediate only
             default: decode_use_imm = 1'b0;
         endcase
     end

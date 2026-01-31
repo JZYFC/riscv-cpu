@@ -57,6 +57,19 @@ module IF(
     wire [`INST_ADDR_WIDTH-1:0] bp_pred_target;
     wire [`BP_GHR_BITS-1:0] bp_pred_hist;
 
+    wire [1:0] word_idx = reg_PC[3:2];
+    wire       cross_line = (word_idx == 2'b11);
+    wire [`INST_ADDR_WIDTH-1:0] seq_next_pc = reg_PC + (cross_line ? `INST_ADD_STEP : FETCH_STRIDE);
+    wire [`INST_ADDR_WIDTH-1:0] chosen_target = bp_pred_taken ? bp_pred_target : seq_next_pc;
+
+    wire line_hit = line_valid && (line_base == reg_PC[31:4]);
+    wire need_line = !line_hit;
+
+    assign ic_req = (!stall) && (!flush) && (!redirect_valid) && need_line;
+    assign ic_paddr = reg_PC;
+
+    wire [127:0] line_data_eff = ic_valid ? ic_rdata_line : line_data;
+    wire line_ready = line_hit || ic_valid;
     wire fetch_fire = (!stall) && (!ic_stall) && line_ready && (!flush) && (!redirect_valid);
 
     BranchPredictor u_bp (
@@ -83,20 +96,6 @@ module IF(
         .update1_is_call(bp_update1_is_call),
         .update1_is_return(bp_update1_is_return)
     );
-
-    wire [1:0] word_idx = reg_PC[3:2];
-    wire       cross_line = (word_idx == 2'b11);
-    wire [`INST_ADDR_WIDTH-1:0] seq_next_pc = reg_PC + (cross_line ? `INST_ADD_STEP : FETCH_STRIDE);
-    wire [`INST_ADDR_WIDTH-1:0] chosen_target = bp_pred_taken ? bp_pred_target : seq_next_pc;
-
-    wire line_hit = line_valid && (line_base == reg_PC[31:4]);
-    wire need_line = !line_hit;
-
-    assign ic_req = (!stall) && (!flush) && (!redirect_valid) && need_line;
-    assign ic_paddr = reg_PC;
-
-    wire [127:0] line_data_eff = ic_valid ? ic_rdata_line : line_data;
-    wire line_ready = line_hit || ic_valid;
 
     function automatic [`INST_WIDTH-1:0] line_word;
         input [127:0] line;

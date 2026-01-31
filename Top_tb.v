@@ -36,7 +36,17 @@ module Top_tb;
     localparam [2:0] F3_BGE     = 3'b101;
     localparam [2:0] F3_BLTU    = 3'b110;
     localparam [2:0] F3_BGEU    = 3'b111;
+    localparam [2:0] F3_MUL     = 3'b000;
+    localparam [2:0] F3_MULH    = 3'b001;
+    localparam [2:0] F3_MULHSU  = 3'b010;
+    localparam [2:0] F3_MULHU   = 3'b011;
     localparam [2:0] RM_RNE     = 3'b000;
+    localparam [2:0] F3_CSRRW   = 3'b001;
+    localparam [2:0] F3_CSRRS   = 3'b010;
+    localparam [2:0] F3_CSRRC   = 3'b011;
+    localparam [2:0] F3_CSRRWI  = 3'b101;
+    localparam [2:0] F3_CSRRSI  = 3'b110;
+    localparam [2:0] F3_CSRRCI  = 3'b111;
 
     function [31:0] enc_r;
         input [6:0] funct7;
@@ -116,6 +126,14 @@ module Top_tb;
         input [31:0] value;
         begin
             dut.u_prf.float_prf[regnum] = value;
+        end
+    endtask
+
+    task write_csr;
+        input [11:0] addr;
+        input [31:0] value;
+        begin
+            dut.u_issue.csr_file[addr] = value;
         end
     endtask
 
@@ -572,6 +590,51 @@ module Top_tb;
         end
     endtask
 
+    task run_store_task;
+        input integer idx;
+        input [31:0] inst;
+        input [31:0] pc;
+        input [4:0]  rs1;
+        input [31:0] rs1_val;
+        input [4:0]  rs2;
+        input [31:0] rs2_val;
+        integer cycles;
+        begin
+            rst_n = 1'b0;
+            repeat (5) @(posedge clk);
+            rst_n = 1'b1;
+            @(posedge clk);
+            write_prf(rs1, rs1_val);
+            write_prf(rs2, rs2_val);
+
+            force dut.u_if.out_inst_0 = inst;
+            force dut.u_if.out_inst_1 = 32'h0000_0013;
+            force dut.u_if.out_inst_valid = 2'b01;
+            force dut.u_if.out_inst_addr_0 = pc;
+            force dut.u_if.out_inst_addr_1 = pc + 32'd4;
+
+            begin : wait_store_commit
+                cycles = 0;
+                while (cycles < 200) begin
+                    @(posedge clk);
+                    #1;
+                    cycles = cycles + 1;
+                    if (dut.commit0_valid) begin
+                        $display("PASS_STORE[%0d] inst=%h", idx, inst);
+                        disable wait_store_commit;
+                    end
+                end
+                $display("TIMEOUT_STORE[%0d] inst=%h", idx, inst);
+            end
+
+            release dut.u_if.out_inst_0;
+            release dut.u_if.out_inst_1;
+            release dut.u_if.out_inst_valid;
+            release dut.u_if.out_inst_addr_0;
+            release dut.u_if.out_inst_addr_1;
+        end
+    endtask
+
     initial begin
         clk = 1'b0;
         forever #5 clk = ~clk;
@@ -823,6 +886,143 @@ module Top_tb;
                  enc_r(7'b0001000, 5'd8, 5'd7, RM_RNE, 5'd9, OPCODE_OP_FP),
                  32'h0000_1000,
                  5'd9, 5'd7, 32'h4000_0000, 5'd8, 32'h3F00_0000, 32'h3F80_0000);
+
+        // --- Memory Access Extended Tests ---
+
+        // LB (from 0x40 -> 0xEF -> sign extended)
+        run_test(40,
+                 enc_i(12'h000, 5'd1, 3'b000, 5'd2, OPCODE_LOAD),
+                 32'h0000_1000,
+                 5'd2, 5'd1, 32'h0000_0040, 5'd0, 32'd0, 32'hFFFF_FFEF);
+
+        // LH (from 0x40 -> 0xBEEF -> sign extended)
+        run_test(41,
+                 enc_i(12'h000, 5'd1, 3'b001, 5'd3, OPCODE_LOAD),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'h0000_0040, 5'd0, 32'd0, 32'hFFFF_BEEF);
+
+        // LBU (from 0x40 -> 0xEF -> zero extended)
+        run_test(42,
+                 enc_i(12'h000, 5'd1, 3'b100, 5'd4, OPCODE_LOAD),
+                 32'h0000_1000,
+                 5'd4, 5'd1, 32'h0000_0040, 5'd0, 32'd0, 32'h0000_00EF);
+
+        // LHU (from 0x40 -> 0xBEEF -> zero extended)
+        run_test(43,
+                 enc_i(12'h000, 5'd1, 3'b101, 5'd5, OPCODE_LOAD),
+                 32'h0000_1000,
+                 5'd5, 5'd1, 32'h0000_0040, 5'd0, 32'd0, 32'h0000_BEEF);
+
+        // Store-Load Tests
+        // SB 0x88 at 0x50
+        run_store_task(44,
+                 enc_s(12'h000, 5'd2, 5'd1, 3'b000, OPCODE_STORE),
+                 32'h0000_1000,
+                 5'd1, 32'h0000_0050, 5'd2, 32'h0000_0088);
+        // LBU 0x50 -> 0x88
+        run_test(45,
+                 enc_i(12'h000, 5'd1, 3'b100, 5'd3, OPCODE_LOAD),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'h0000_0050, 5'd0, 32'd0, 32'h0000_0088);
+
+        // SH 0x7766 at 0x52
+        run_store_task(46,
+                 enc_s(12'h000, 5'd2, 5'd1, 3'b001, OPCODE_STORE),
+                 32'h0000_1000,
+                 5'd1, 32'h0000_0052, 5'd2, 32'h0000_7766);
+        // LHU 0x52 -> 0x7766
+        run_test(47,
+                 enc_i(12'h000, 5'd1, 3'b101, 5'd3, OPCODE_LOAD),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'h0000_0052, 5'd0, 32'd0, 32'h0000_7766);
+
+        // SW 0x12345678 at 0x54
+        run_store_task(48,
+                 enc_s(12'h000, 5'd2, 5'd1, 3'b010, OPCODE_STORE),
+                 32'h0000_1000,
+                 5'd1, 32'h0000_0054, 5'd2, 32'h1234_5678);
+        // LW 0x54 -> 0x12345678
+        run_test(49,
+                 enc_i(12'h000, 5'd1, 3'b010, 5'd3, OPCODE_LOAD),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'h0000_0054, 5'd0, 32'd0, 32'h1234_5678);
+
+        // --- Zmmul Extension Tests ---
+
+        // MUL (20 * 10 = 200)
+        run_test(50,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_MUL, 5'd3, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'd20, 5'd2, 32'd10, 32'd200);
+
+        // MULH (-2^31 * (2^31 - 1) -> High: 0xC0000000)
+        run_test(51,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_MULH, 5'd4, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd4, 5'd1, 32'h8000_0000, 5'd2, 32'h7FFF_FFFF, 32'hC000_0000);
+
+        // MULHSU (-1 * 2^31 -> High: 0xFFFFFFFF)
+        run_test(52,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_MULHSU, 5'd5, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd5, 5'd1, 32'hFFFF_FFFF, 5'd2, 32'h8000_0000, 32'hFFFF_FFFF);
+
+        // MULHU (2^31 * 2^31 -> High: 0x40000000)
+        run_test(53,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_MULHU, 5'd6, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd6, 5'd1, 32'h8000_0000, 5'd2, 32'h8000_0000, 32'h4000_0000);
+
+        // --- Zicsr Extension Tests ---
+        
+        // Initialize CSR 0x300 (mstatus) for read-modify-write tests
+        write_csr(12'h300, 32'h1234_5678);
+
+        // CSRRW: Write 0xDEADBEEF to 0x300, Read old 0x12345678 to rd=10
+        run_test(60,
+                 enc_i(12'h300, 5'd1, F3_CSRRW, 5'd10, OPCODE_SYSTEM),
+                 32'h0000_1000,
+                 5'd10, 5'd1, 32'hDEAD_BEEF, 5'd0, 32'd0, 32'h1234_5678);
+
+        // CSRRS: Read 0x300 (now DEADBEEF), Set 0x0000FFFF. Result in CSR: DEADFFFF. Rd gets old DEADBEEF.
+        run_test(61,
+                 enc_i(12'h300, 5'd1, F3_CSRRS, 5'd11, OPCODE_SYSTEM),
+                 32'h0000_1000,
+                 5'd11, 5'd1, 32'h0000_FFFF, 5'd0, 32'd0, 32'hDEAD_BEEF);
+
+        // CSRRC: Read 0x300 (now DEADFFFF), Clear 0x0000000F. Result in CSR: DEADFFF0. Rd gets old DEADFFFF.
+        run_test(62,
+                 enc_i(12'h300, 5'd1, F3_CSRRC, 5'd12, OPCODE_SYSTEM),
+                 32'h0000_1000,
+                 5'd12, 5'd1, 32'h0000_000F, 5'd0, 32'd0, 32'hDEAD_FFFF);
+
+        // Check final value of 0x300 via CSRRW (Write 0, Read old)
+        run_test(63,
+                 enc_i(12'h300, 5'd0, F3_CSRRW, 5'd13, OPCODE_SYSTEM),
+                 32'h0000_1000,
+                 5'd13, 5'd0, 32'd0, 5'd0, 32'd0, 32'hDEAD_FFF0);
+
+        // Initialize CSR 0x301 for Immediate tests
+        write_csr(12'h301, 32'h0000_0010);
+
+        // CSRRWI: Write uimm=5 to 0x301. Rd gets old 0x10.
+        // imm field is 0x301. rs1 field holds uimm=5.
+        run_test(64,
+                 enc_i(12'h301, 5'd5, F3_CSRRWI, 5'd14, OPCODE_SYSTEM),
+                 32'h0000_1000,
+                 5'd14, 5'd0, 32'd0, 5'd0, 32'd0, 32'h0000_0010);
+
+        // CSRRSI: Read 0x301 (now 5), Set uimm=2. Result 7. Rd gets 5.
+        run_test(65,
+                 enc_i(12'h301, 5'd2, F3_CSRRSI, 5'd15, OPCODE_SYSTEM),
+                 32'h0000_1000,
+                 5'd15, 5'd0, 32'd0, 5'd0, 32'd0, 32'd5);
+
+        // CSRRCI: Read 0x301 (now 7), Clear uimm=1. Result 6. Rd gets 7.
+        run_test(66,
+                 enc_i(12'h301, 5'd1, F3_CSRRCI, 5'd16, OPCODE_SYSTEM),
+                 32'h0000_1000,
+                 5'd16, 5'd0, 32'd0, 5'd0, 32'd0, 32'd7);
 
         $finish;
     end
