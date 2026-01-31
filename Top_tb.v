@@ -22,6 +22,10 @@ module Top_tb;
     localparam [6:0] OPCODE_MISC_MEM = 7'b0001111;
     localparam [6:0] OPCODE_SYSTEM   = 7'b1110011;
 
+    localparam integer CACHE_INDEX_BITS = 6;
+    localparam integer CACHE_TAG_BITS = 22;
+    localparam integer CACHE_SETS = 1 << CACHE_INDEX_BITS;
+
     localparam [2:0] F3_ADD_SUB = 3'b000;
     localparam [2:0] F3_SLL     = 3'b001;
     localparam [2:0] F3_SLT     = 3'b010;
@@ -47,6 +51,16 @@ module Top_tb;
     localparam [2:0] F3_CSRRWI  = 3'b101;
     localparam [2:0] F3_CSRRSI  = 3'b110;
     localparam [2:0] F3_CSRRCI  = 3'b111;
+
+    localparam integer TASK_MAX_REG_CHECK = 8;
+    localparam integer TASK_MAX_MEM_CHECK = 8;
+    localparam integer TASK_DEBUG_STRIDE = 1;
+    reg [4:0] task_reg_num [0:TASK_MAX_REG_CHECK-1];
+    reg [31:0] task_reg_val [0:TASK_MAX_REG_CHECK-1];
+    integer task_reg_count;
+    reg [31:0] task_mem_addr [0:TASK_MAX_MEM_CHECK-1];
+    reg [31:0] task_mem_val [0:TASK_MAX_MEM_CHECK-1];
+    integer task_mem_count;
 
     function [31:0] enc_r;
         input [6:0] funct7;
@@ -110,6 +124,169 @@ module Top_tb;
             enc_u = {imm, rd, opcode};
         end
     endfunction
+
+    task clear_mainmem;
+        integer i;
+        begin
+            for (i = 0; i < 256; i = i + 1) begin
+                dut.u_mainmem.ram[i] = 128'b0;
+            end
+        end
+    endtask
+
+    task clear_caches;
+        integer i;
+        begin
+            for (i = 0; i < CACHE_SETS; i = i + 1) begin
+                dut.u_icache.tag_way0[i] = {CACHE_TAG_BITS+2{1'b0}};
+                dut.u_icache.tag_way1[i] = {CACHE_TAG_BITS+2{1'b0}};
+                dut.u_icache.data_way0[i] = 128'b0;
+                dut.u_icache.data_way1[i] = 128'b0;
+                dut.u_icache.lru[i] = 1'b0;
+                dut.u_lsu.u_cache.tag_way0[i] = {CACHE_TAG_BITS+2{1'b0}};
+                dut.u_lsu.u_cache.tag_way1[i] = {CACHE_TAG_BITS+2{1'b0}};
+                dut.u_lsu.u_cache.data_way0[i] = 128'b0;
+                dut.u_lsu.u_cache.data_way1[i] = 128'b0;
+                dut.u_lsu.u_cache.lru[i] = 1'b0;
+            end
+        end
+    endtask
+
+    task write_mem_line;
+        input [31:0] addr;
+        input [127:0] line;
+        begin
+            dut.u_mainmem.ram[addr[11:4]] = line;
+        end
+    endtask
+
+    task write_mem_word;
+        input [31:0] addr;
+        input [31:0] value;
+        reg [7:0] idx;
+        reg [1:0] word_idx;
+        reg [127:0] line;
+        begin
+            idx = addr[11:4];
+            word_idx = addr[3:2];
+            line = dut.u_mainmem.ram[idx];
+            case (word_idx)
+                2'b00: line[31:0] = value;
+                2'b01: line[63:32] = value;
+                2'b10: line[95:64] = value;
+                2'b11: line[127:96] = value;
+            endcase
+            dut.u_mainmem.ram[idx] = line;
+        end
+    endtask
+
+    function [31:0] peek_arch_reg;
+        input [4:0] regnum;
+        reg [5:0] preg;
+        begin
+            if (regnum == 5'd0) begin
+                peek_arch_reg = 32'b0;
+            end else begin
+                preg = dut.u_regrename.int_map[regnum];
+                peek_arch_reg = dut.u_prf.int_prf[preg];
+            end
+        end
+    endfunction
+
+    function [31:0] peek_mem_word;
+        input [31:0] addr;
+        reg [CACHE_TAG_BITS-1:0] tag;
+        reg [CACHE_INDEX_BITS-1:0] index;
+        reg [CACHE_TAG_BITS+1:0] raw0;
+        reg [CACHE_TAG_BITS+1:0] raw1;
+        reg hit0;
+        reg hit1;
+        reg [127:0] line;
+        begin
+            tag = addr[31:32-CACHE_TAG_BITS];
+            index = addr[4 + CACHE_INDEX_BITS - 1 : 4];
+            raw0 = dut.u_lsu.u_cache.tag_way0[index];
+            raw1 = dut.u_lsu.u_cache.tag_way1[index];
+            hit0 = raw0[CACHE_TAG_BITS] && (raw0[CACHE_TAG_BITS-1:0] == tag);
+            hit1 = raw1[CACHE_TAG_BITS] && (raw1[CACHE_TAG_BITS-1:0] == tag);
+
+            if (hit1) begin
+                line = dut.u_lsu.u_cache.data_way1[index];
+            end else if (hit0) begin
+                line = dut.u_lsu.u_cache.data_way0[index];
+            end else begin
+                line = dut.u_mainmem.ram[addr[11:4]];
+            end
+
+            case (addr[3:2])
+                2'b00: peek_mem_word = line[31:0];
+                2'b01: peek_mem_word = line[63:32];
+                2'b10: peek_mem_word = line[95:64];
+                2'b11: peek_mem_word = line[127:96];
+            endcase
+        end
+    endfunction
+
+    task load_sum_program;
+        input [31:0] base_pc;
+        begin
+            // main
+            write_mem_word(base_pc + 32'd0,  enc_i(12'hFE0, 5'd2, F3_ADD_SUB, 5'd2, OPCODE_OP_IMM)); // addi sp,sp,-32
+            write_mem_word(base_pc + 32'd4,  enc_s(12'h01C, 5'd1, 5'd2, 3'b010, OPCODE_STORE));     // sw ra,28(sp)
+            write_mem_word(base_pc + 32'd8,  enc_s(12'h018, 5'd8, 5'd2, 3'b010, OPCODE_STORE));     // sw s0,24(sp)
+            write_mem_word(base_pc + 32'd12, enc_i(12'h020, 5'd2, F3_ADD_SUB, 5'd8, OPCODE_OP_IMM)); // addi s0,sp,32
+            write_mem_word(base_pc + 32'd16, enc_i(12'h00A, 5'd0, F3_ADD_SUB, 5'd15, OPCODE_OP_IMM)); // li a5,10
+            write_mem_word(base_pc + 32'd20, enc_s(12'hFEC, 5'd15, 5'd8, 3'b010, OPCODE_STORE));     // sw a5,-20(s0)
+            write_mem_word(base_pc + 32'd24, enc_i(12'h014, 5'd0, F3_ADD_SUB, 5'd15, OPCODE_OP_IMM)); // li a5,20
+            write_mem_word(base_pc + 32'd28, enc_s(12'hFE8, 5'd15, 5'd8, 3'b010, OPCODE_STORE));     // sw a5,-24(s0)
+            write_mem_word(base_pc + 32'd32, enc_i(12'h014, 5'd0, F3_ADD_SUB, 5'd11, OPCODE_OP_IMM)); // li a1,20
+            write_mem_word(base_pc + 32'd36, enc_i(12'h00A, 5'd0, F3_ADD_SUB, 5'd10, OPCODE_OP_IMM)); // li a0,10
+            write_mem_word(base_pc + 32'd40, enc_j(21'd28, 5'd1, OPCODE_JAL));                        // call sum
+            write_mem_word(base_pc + 32'd44, enc_s(12'hFE4, 5'd10, 5'd8, 3'b010, OPCODE_STORE));     // sw a0,-28(s0)
+            write_mem_word(base_pc + 32'd48, enc_i(12'h000, 5'd0, F3_ADD_SUB, 5'd0, OPCODE_OP_IMM)); // nop
+            write_mem_word(base_pc + 32'd52, enc_i(12'h01C, 5'd2, 3'b010, 5'd1, OPCODE_LOAD));       // lw ra,28(sp)
+            write_mem_word(base_pc + 32'd56, enc_i(12'h018, 5'd2, 3'b010, 5'd8, OPCODE_LOAD));       // lw s0,24(sp)
+            write_mem_word(base_pc + 32'd60, enc_i(12'h020, 5'd2, F3_ADD_SUB, 5'd2, OPCODE_OP_IMM)); // addi sp,sp,32
+            write_mem_word(base_pc + 32'd64, enc_i(12'h000, 5'd1, F3_ADD_SUB, 5'd0, OPCODE_JALR));   // jr ra
+
+            // sum (base_pc + 0x44)
+            write_mem_word(base_pc + 32'h44, enc_i(12'hFD0, 5'd2, F3_ADD_SUB, 5'd2, OPCODE_OP_IMM)); // addi sp,sp,-48
+            write_mem_word(base_pc + 32'h48, enc_s(12'h02C, 5'd1, 5'd2, 3'b010, OPCODE_STORE));     // sw ra,44(sp)
+            write_mem_word(base_pc + 32'h4C, enc_s(12'h028, 5'd8, 5'd2, 3'b010, OPCODE_STORE));     // sw s0,40(sp)
+            write_mem_word(base_pc + 32'h50, enc_i(12'h030, 5'd2, F3_ADD_SUB, 5'd8, OPCODE_OP_IMM)); // addi s0,sp,48
+            write_mem_word(base_pc + 32'h54, enc_s(12'hFDC, 5'd10, 5'd8, 3'b010, OPCODE_STORE));    // sw a0,-36(s0)
+            write_mem_word(base_pc + 32'h58, enc_s(12'hFD8, 5'd11, 5'd8, 3'b010, OPCODE_STORE));    // sw a1,-40(s0)
+            write_mem_word(base_pc + 32'h5C, enc_s(12'hFEC, 5'd0, 5'd8, 3'b010, OPCODE_STORE));     // sw zero,-20(s0)
+            write_mem_word(base_pc + 32'h60, enc_i(12'hFD8, 5'd8, 3'b010, 5'd14, OPCODE_LOAD));     // lw a4,-40(s0)
+            write_mem_word(base_pc + 32'h64, enc_i(12'hFDC, 5'd8, 3'b010, 5'd15, OPCODE_LOAD));     // lw a5,-36(s0)
+            write_mem_word(base_pc + 32'h68, enc_r(7'b0100000, 5'd15, 5'd14, F3_ADD_SUB, 5'd15, OPCODE_OP)); // sub a5,a4,a5
+            write_mem_word(base_pc + 32'h6C, enc_s(12'hFE4, 5'd15, 5'd8, 3'b010, OPCODE_STORE));    // sw a5,-28(s0)
+            write_mem_word(base_pc + 32'h70, enc_s(12'hFE8, 5'd0, 5'd8, 3'b010, OPCODE_STORE));     // sw zero,-24(s0)
+            write_mem_word(base_pc + 32'h74, enc_j(21'd40, 5'd0, OPCODE_JAL));                       // j .L2
+            write_mem_word(base_pc + 32'h78, enc_i(12'hFDC, 5'd8, 3'b010, 5'd14, OPCODE_LOAD));     // lw a4,-36(s0)
+            write_mem_word(base_pc + 32'h7C, enc_i(12'hFEC, 5'd8, 3'b010, 5'd15, OPCODE_LOAD));     // lw a5,-20(s0)
+            write_mem_word(base_pc + 32'h80, enc_r(7'b0000000, 5'd15, 5'd14, F3_ADD_SUB, 5'd15, OPCODE_OP)); // add a5,a4,a5
+            write_mem_word(base_pc + 32'h84, enc_i(12'hFE8, 5'd8, 3'b010, 5'd14, OPCODE_LOAD));     // lw a4,-24(s0)
+            write_mem_word(base_pc + 32'h88, enc_r(7'b0000000, 5'd15, 5'd14, F3_ADD_SUB, 5'd15, OPCODE_OP)); // add a5,a4,a5
+            write_mem_word(base_pc + 32'h8C, enc_s(12'hFE8, 5'd15, 5'd8, 3'b010, OPCODE_STORE));    // sw a5,-24(s0)
+            write_mem_word(base_pc + 32'h90, enc_i(12'hFEC, 5'd8, 3'b010, 5'd15, OPCODE_LOAD));     // lw a5,-20(s0)
+            write_mem_word(base_pc + 32'h94, enc_i(12'h001, 5'd15, F3_ADD_SUB, 5'd15, OPCODE_OP_IMM)); // addi a5,a5,1
+            write_mem_word(base_pc + 32'h98, enc_s(12'hFEC, 5'd15, 5'd8, 3'b010, OPCODE_STORE));    // sw a5,-20(s0)
+            write_mem_word(base_pc + 32'h9C, enc_i(12'hFEC, 5'd8, 3'b010, 5'd14, OPCODE_LOAD));     // lw a4,-20(s0)
+            write_mem_word(base_pc + 32'hA0, enc_i(12'hFE4, 5'd8, 3'b010, 5'd15, OPCODE_LOAD));     // lw a5,-28(s0)
+            write_mem_word(base_pc + 32'hA4, enc_b(13'h1FD4, 5'd15, 5'd14, F3_BLT, OPCODE_BRANCH)); // blt a4,a5,.L3
+            write_mem_word(base_pc + 32'hA8, enc_i(12'hFE8, 5'd8, 3'b010, 5'd15, OPCODE_LOAD));     // lw a5,-24(s0)
+            write_mem_word(base_pc + 32'hAC, enc_i(12'h000, 5'd15, F3_ADD_SUB, 5'd10, OPCODE_OP_IMM)); // mv a0,a5
+            write_mem_word(base_pc + 32'hB0, enc_i(12'h02C, 5'd2, 3'b010, 5'd1, OPCODE_LOAD));       // lw ra,44(sp)
+            write_mem_word(base_pc + 32'hB4, enc_i(12'h028, 5'd2, 3'b010, 5'd8, OPCODE_LOAD));       // lw s0,40(sp)
+            write_mem_word(base_pc + 32'hB8, enc_i(12'h030, 5'd2, F3_ADD_SUB, 5'd2, OPCODE_OP_IMM)); // addi sp,sp,48
+            write_mem_word(base_pc + 32'hBC, enc_i(12'h000, 5'd1, F3_ADD_SUB, 5'd0, OPCODE_JALR));   // jr ra
+
+            // halt loop (base_pc + 0xC0)
+            write_mem_word(base_pc + 32'hC0, enc_j(21'd0, 5'd0, OPCODE_JAL));
+        end
+    endtask
+
 
     task write_prf;
         input [4:0] regnum;
@@ -635,6 +812,133 @@ module Top_tb;
         end
     endtask
 
+    task run_task_test;
+        input integer idx;
+        input [31:0] start_pc;
+        input integer target_commits;
+        input [31:0] init_sp;
+        input [31:0] init_ra;
+        integer cycles;
+        integer commit_count;
+        integer i;
+        integer drain_cycles;
+        reg pass;
+        reg [31:0] got_reg;
+        reg [31:0] got_mem;
+        integer last_commit_cycle;
+        begin
+            rst_n = 1'b0;
+            repeat (5) @(posedge clk);
+
+            clear_caches();
+            clear_mainmem();
+            load_sum_program(start_pc);
+
+            rst_n = 1'b1;
+            @(negedge clk);
+            write_prf(5'd2, init_sp);
+            write_prf(5'd1, init_ra);
+
+            if (start_pc != 32'h0000_1000) begin
+                force dut.u_if.reg_PC = start_pc;
+                force dut.u_if.line_valid = 1'b0;
+                @(posedge clk);
+                #1;
+                release dut.u_if.reg_PC;
+                release dut.u_if.line_valid;
+            end
+
+            commit_count = 0;
+            cycles = 0;
+            pass = 1'b1;
+            last_commit_cycle = 0;
+
+            begin : wait_task_commit
+                while (cycles < 4000 && commit_count < target_commits) begin
+                    @(posedge clk);
+                    #1;
+                    cycles = cycles + 1;
+                    if (dut.commit0_valid) begin
+                        commit_count = commit_count + 1;
+                        last_commit_cycle = cycles;
+                        if ((commit_count % TASK_DEBUG_STRIDE) == 0) begin
+                            $display("TASK_COMMIT0[%0d] c=%0d pc=%h rd=%0d val=%h exc=%b",
+                                     idx, commit_count, dut.commit0_pc, dut.commit0_arch_rd,
+                                     dut.commit0_value, dut.commit0_exception);
+                        end
+                        if (dut.commit0_exception) begin
+                            pass = 1'b0;
+                        end
+                    end
+                    if (dut.commit1_valid) begin
+                        commit_count = commit_count + 1;
+                        last_commit_cycle = cycles;
+                        if ((commit_count % TASK_DEBUG_STRIDE) == 0) begin
+                            $display("TASK_COMMIT1[%0d] c=%0d pc=%h rd=%0d val=%h exc=%b",
+                                     idx, commit_count, dut.commit1_pc, dut.commit1_arch_rd,
+                                     dut.commit1_value, dut.commit1_exception);
+                        end
+                        if (dut.commit1_exception) begin
+                            pass = 1'b0;
+                        end
+                    end
+                    if (dut.redirect_valid) begin
+                        $display("TASK_REDIRECT[%0d] cyc=%0d target=%h",
+                                 idx, cycles, dut.redirect_target);
+                    end
+                end
+                if (commit_count < target_commits) begin
+                    $display("TIMEOUT_TASK[%0d] commits=%0d/%0d", idx, commit_count, target_commits);
+                    $display("DBG_TASK[%0d] cyc=%0d last_commit=%0d if=%b ib=%b pre=%b rn=%b post=%b rs_cnt=%0d rob_empty=%b rn_stall=%b issue_stall=%b disp_ready=%b flush=%b redirect=%b pc=%h",
+                             idx, cycles, last_commit_cycle,
+                             dut.if_inst_valid, dut.ib_valid, dut.pre_valid, dut.rn_valid, dut.post_valid,
+                             dut.u_issue.rs_count, dut.rob_empty, dut.rn_stall, dut.issue_stall, dut.dispatch_ready,
+                             dut.global_flush, dut.redirect_valid, dut.u_if.reg_PC);
+                    pass = 1'b0;
+                end
+            end
+
+            force dut.u_if.out_inst_valid = 2'b00;
+            force dut.u_if.out_inst_0 = 32'h0000_0013;
+            force dut.u_if.out_inst_1 = 32'h0000_0013;
+
+            drain_cycles = 0;
+            while (drain_cycles < 200 && !(dut.rob_empty && (dut.u_issue.rs_count == 0) && !dut.u_lsu.busy)) begin
+                @(posedge clk);
+                #1;
+                drain_cycles = drain_cycles + 1;
+            end
+
+            for (i = 0; i < task_reg_count; i = i + 1) begin
+                got_reg = peek_arch_reg(task_reg_num[i]);
+                if (got_reg !== task_reg_val[i]) begin
+                    $display("FAIL_TASK_REG[%0d] reg=%0d exp=%h got=%h",
+                             idx, task_reg_num[i], task_reg_val[i], got_reg);
+                    pass = 1'b0;
+                end
+            end
+
+            for (i = 0; i < task_mem_count; i = i + 1) begin
+                got_mem = peek_mem_word(task_mem_addr[i]);
+                if (got_mem !== task_mem_val[i]) begin
+                    $display("FAIL_TASK_MEM[%0d] addr=%h exp=%h got=%h",
+                             idx, task_mem_addr[i], task_mem_val[i], got_mem);
+                    pass = 1'b0;
+                end
+            end
+
+            if (pass) begin
+                $display("PASS_TASK[%0d] commits=%0d", idx, commit_count);
+            end else begin
+                $display("FAIL_TASK[%0d] commits=%0d", idx, commit_count);
+            end
+
+            release dut.u_if.out_inst_valid;
+            release dut.u_if.out_inst_0;
+            release dut.u_if.out_inst_1;
+        end
+    endtask
+
     initial begin
         clk = 1'b0;
         forever #5 clk = ~clk;
@@ -1023,6 +1327,21 @@ module Top_tb;
                  enc_i(12'h301, 5'd1, F3_CSRRCI, 5'd16, OPCODE_SYSTEM),
                  32'h0000_1000,
                  5'd16, 5'd0, 32'd0, 5'd0, 32'd0, 32'd7);
+
+        // --- Task-level Test: sum(int,int) ---
+        task_reg_count = 0;
+        task_mem_count = 0;
+        task_reg_num[task_reg_count] = 5'd10; // a0
+        task_reg_val[task_reg_count] = 32'd145;
+        task_reg_count = task_reg_count + 1;
+        task_reg_num[task_reg_count] = 5'd2; // sp
+        task_reg_val[task_reg_count] = 32'h0000_0F00;
+        task_reg_count = task_reg_count + 1;
+        task_mem_addr[task_mem_count] = 32'h0000_0EE4; // s0-28
+        task_mem_val[task_mem_count] = 32'd145;
+        task_mem_count = task_mem_count + 1;
+
+        run_task_test(70, 32'h0000_1000, 48, 32'h0000_0F00, 32'h0000_10C0);
 
         $finish;
     end
