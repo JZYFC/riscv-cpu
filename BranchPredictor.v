@@ -69,7 +69,8 @@ module BranchPredictor #(
     wire [IDX_BITS-1:0] fetch_idx = make_idx(ghr, fetch_pc);
     wire [TAG_BITS-1:0] fetch_tag = fetch_pc[`INST_ADDR_WIDTH-1:IDX_BITS+2];
     wire btb_hit = btb_valid[fetch_idx] && (btb_tag[fetch_idx] == fetch_tag);
-    assign pred_taken  = fetch_valid && pht[fetch_idx][1];
+    // Only predict taken when BTB hits to avoid suppressing slot1 on non-branch PCs.
+    assign pred_taken  = fetch_valid && btb_hit && pht[fetch_idx][1];
     wire [`INST_ADDR_WIDTH-1:0] ras_top = ras[(ras_sp==0)?{($clog2(RAS_DEPTH)+1){1'b0}}: (ras_sp-1'b1)];
     wire [`INST_ADDR_WIDTH-1:0] btb_target_sel = btb_is_ret[fetch_idx] ? ras_top : btb_target[fetch_idx];
     assign pred_target = (btb_hit ? btb_target_sel : (fetch_pc + FETCH_STRIDE));

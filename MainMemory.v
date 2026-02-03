@@ -38,6 +38,9 @@ module MainMemory (
 
                     if (mem_we) begin
                         ram[idx] <= mem_wdata; 
+                        if (mem_addr[11:4] == 8'hEB) begin
+                            $display("DBG_MEM_WRITE addr=%h line=%h", mem_addr, mem_wdata);
+                        end
                     end else begin
                         mem_rdata <= ram[idx];
                     end

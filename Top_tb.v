@@ -55,6 +55,9 @@ module Top_tb;
     localparam integer TASK_MAX_REG_CHECK = 8;
     localparam integer TASK_MAX_MEM_CHECK = 8;
     localparam integer TASK_DEBUG_STRIDE = 1;
+    localparam integer DEBUG_TASK_IDX = 70;
+    localparam [31:0] DEBUG_PC_LO = 32'h0000_1050;
+    localparam [31:0] DEBUG_PC_HI = 32'h0000_1090;
     reg [4:0] task_reg_num [0:TASK_MAX_REG_CHECK-1];
     reg [31:0] task_reg_val [0:TASK_MAX_REG_CHECK-1];
     integer task_reg_count;
@@ -125,6 +128,13 @@ module Top_tb;
         end
     endfunction
 
+    function is_debug_pc;
+        input [31:0] pc;
+        begin
+            is_debug_pc = (pc >= DEBUG_PC_LO) && (pc <= DEBUG_PC_HI);
+        end
+    endfunction
+
     task clear_mainmem;
         integer i;
         begin
@@ -190,6 +200,20 @@ module Top_tb;
                 preg = dut.u_regrename.int_map[regnum];
                 peek_arch_reg = dut.u_prf.int_prf[preg];
             end
+        end
+    endfunction
+
+    function [31:0] peek_imem_word;
+        input [31:0] addr;
+        reg [127:0] line;
+        begin
+            line = dut.u_mainmem.ram[addr[11:4]];
+            case (addr[3:2])
+                2'b00: peek_imem_word = line[31:0];
+                2'b01: peek_imem_word = line[63:32];
+                2'b10: peek_imem_word = line[95:64];
+                2'b11: peek_imem_word = line[127:96];
+            endcase
         end
     endfunction
 
@@ -822,7 +846,10 @@ module Top_tb;
         integer commit_count;
         integer i;
         integer drain_cycles;
+        integer r;
+        integer robd;
         reg pass;
+        reg head_in_rs;
         reg [31:0] got_reg;
         reg [31:0] got_mem;
         integer last_commit_cycle;
@@ -833,6 +860,14 @@ module Top_tb;
             clear_caches();
             clear_mainmem();
             load_sum_program(start_pc);
+            if (idx == DEBUG_TASK_IDX) begin
+                $display("DBG_IMEM_INIT[%0d] start_pc=%h", idx, start_pc);
+                $display("DBG_IMEM[%0d] %h = %h", idx, start_pc + 32'h0078, peek_imem_word(start_pc + 32'h0078));
+                $display("DBG_IMEM[%0d] %h = %h", idx, start_pc + 32'h009C, peek_imem_word(start_pc + 32'h009C));
+                $display("DBG_IMEM[%0d] %h = %h", idx, start_pc + 32'h00A4, peek_imem_word(start_pc + 32'h00A4));
+                $display("DBG_IMEM[%0d] %h = %h", idx, start_pc + 32'h00AC, peek_imem_word(start_pc + 32'h00AC));
+                $display("DBG_IMEM[%0d] %h = %h", idx, start_pc + 32'h00C0, peek_imem_word(start_pc + 32'h00C0));
+            end
 
             rst_n = 1'b1;
             @(negedge clk);
@@ -862,9 +897,10 @@ module Top_tb;
                         commit_count = commit_count + 1;
                         last_commit_cycle = cycles;
                         if ((commit_count % TASK_DEBUG_STRIDE) == 0) begin
-                            $display("TASK_COMMIT0[%0d] c=%0d pc=%h rd=%0d val=%h exc=%b",
-                                     idx, commit_count, dut.commit0_pc, dut.commit0_arch_rd,
-                                     dut.commit0_value, dut.commit0_exception);
+                            $display("TASK_COMMIT0[%0d] c=%0d pc=%h inst=%h rd=%0d val=%h exc=%b has_dest=%b new_preg=%0d old_preg=%0d",
+                                     idx, commit_count, dut.commit0_pc, peek_imem_word(dut.commit0_pc),
+                                     dut.commit0_arch_rd, dut.commit0_value, dut.commit0_exception,
+                                     dut.commit0_has_dest, dut.commit0_new_preg, dut.commit0_old_preg);
                         end
                         if (dut.commit0_exception) begin
                             pass = 1'b0;
@@ -874,17 +910,203 @@ module Top_tb;
                         commit_count = commit_count + 1;
                         last_commit_cycle = cycles;
                         if ((commit_count % TASK_DEBUG_STRIDE) == 0) begin
-                            $display("TASK_COMMIT1[%0d] c=%0d pc=%h rd=%0d val=%h exc=%b",
-                                     idx, commit_count, dut.commit1_pc, dut.commit1_arch_rd,
-                                     dut.commit1_value, dut.commit1_exception);
+                            $display("TASK_COMMIT1[%0d] c=%0d pc=%h inst=%h rd=%0d val=%h exc=%b has_dest=%b new_preg=%0d old_preg=%0d",
+                                     idx, commit_count, dut.commit1_pc, peek_imem_word(dut.commit1_pc),
+                                     dut.commit1_arch_rd, dut.commit1_value, dut.commit1_exception,
+                                     dut.commit1_has_dest, dut.commit1_new_preg, dut.commit1_old_preg);
                         end
                         if (dut.commit1_exception) begin
                             pass = 1'b0;
                         end
                     end
+                    if (idx == DEBUG_TASK_IDX) begin
+                        if (dut.global_flush) begin
+                            $display("DBG_FLUSH[%0d] cyc=%0d redirect=%b target=%h rob_idx=%0d rob_head=%0d rob_empty=%b",
+                                     idx, cycles, dut.redirect_valid, dut.redirect_target,
+                                     dut.redirect_rob_idx, dut.rob_head, dut.rob_empty);
+                        end
+                        if (dut.lsu_valid && !dut.lsu_busy) begin
+                            $display("DBG_LSU_REQ[%0d] cyc=%0d load=%b op=%0d addr=%h wdata=%h rob=%0d rd_tag=%0d rd_fp=%b head=%0d",
+                                     idx, cycles, dut.lsu_mem_is_load, dut.lsu_mem_op, dut.lsu_addr,
+                                     dut.lsu_wdata, dut.lsu_rob_idx, dut.lsu_rd_tag, dut.lsu_rd_is_fp, dut.rob_head);
+                        end
+                        if (dut.lsu_wb_valid) begin
+                            $display("DBG_LSU_WB[%0d] cyc=%0d load=%b addr=%h rdata=%h rob=%0d rd_tag=%0d rd_fp=%b mem_peek=%h",
+                                     idx, cycles, dut.u_lsu.mem_is_load_reg, dut.u_lsu.addr_reg,
+                                     dut.lsu_wb_value, dut.lsu_wb_rob_idx, dut.lsu_wb_dest_tag,
+                                     dut.lsu_wb_dest_is_fp, peek_mem_word(dut.u_lsu.addr_reg));
+                        end
+                        if (dut.issue_stall && (dut.post_valid != {`IF_BATCH_SIZE{1'b0}})) begin
+                            $display("DBG_POST_STALL[%0d] cyc=%0d rs_cnt=%0d post_valid=%b pc0=%h rob0=%0d pc1=%h rob1=%0d",
+                                     idx, cycles, dut.u_issue.rs_count, dut.post_valid,
+                                     dut.post_pc_0, dut.post_rob_idx_0, dut.post_pc_1, dut.post_rob_idx_1);
+                            if (dut.post_valid[0]) begin
+                                $display("DBG_POST0[%0d] inst=%h fu=%0d rs1=P%0d rs2=P%0d rd=P%0d imm=%h",
+                                         idx, dut.post_inst_0, dut.post_fu_type_0,
+                                         dut.post_rs1_preg_0, dut.post_rs2_preg_0, dut.post_rd_preg_0,
+                                         dut.post_imm_0);
+                            end
+                            if (dut.post_valid[1]) begin
+                                $display("DBG_POST1[%0d] inst=%h fu=%0d rs1=P%0d rs2=P%0d rd=P%0d imm=%h",
+                                         idx, dut.post_inst_1, dut.post_fu_type_1,
+                                         dut.post_rs1_preg_1, dut.post_rs2_preg_1, dut.post_rd_preg_1,
+                                         dut.post_imm_1);
+                            end
+                        end
+
+                        if ((dut.u_if.out_inst_valid != 2'b00) &&
+                            (is_debug_pc(dut.u_if.out_inst_addr_0) || is_debug_pc(dut.u_if.out_inst_addr_1))) begin
+                            $display("DBG_IF[%0d] cyc=%0d pc0=%h v0=%b inst0=%h pred0=%b tgt0=%h pc1=%h v1=%b inst1=%h pred1=%b tgt1=%h if_pc=%h stall_if=%b ic_stall=%b",
+                                     idx, cycles,
+                                     dut.u_if.out_inst_addr_0, dut.u_if.out_inst_valid[0], dut.u_if.out_inst_0,
+                                     dut.u_if.out_pred_taken_0, dut.u_if.out_pred_target_0,
+                                     dut.u_if.out_inst_addr_1, dut.u_if.out_inst_valid[1], dut.u_if.out_inst_1,
+                                     dut.u_if.out_pred_taken_1, dut.u_if.out_pred_target_1,
+                                     dut.u_if.reg_PC, dut.ib_stall_if, dut.ic_stall);
+                        end
+
+                        if ((dut.u_ibuf.out_valid != 2'b00) &&
+                            (is_debug_pc(dut.u_ibuf.out_pc_0) || is_debug_pc(dut.u_ibuf.out_pc_1))) begin
+                            $display("DBG_IB[%0d] cyc=%0d pc0=%h v0=%b inst0=%h pc1=%h v1=%b inst1=%h out_ready=%b",
+                                     idx, cycles,
+                                     dut.u_ibuf.out_pc_0, dut.u_ibuf.out_valid[0], dut.u_ibuf.out_inst_0,
+                                     dut.u_ibuf.out_pc_1, dut.u_ibuf.out_valid[1], dut.u_ibuf.out_inst_1,
+                                     dut.dispatch_ready);
+                        end
+
+                        if ((dut.pre_valid != 2'b00) &&
+                            (is_debug_pc(dut.pre_pc_0) || is_debug_pc(dut.pre_pc_1))) begin
+                            $display("DBG_PRE[%0d] cyc=%0d pc0=%h v0=%b inst0=%h pc1=%h v1=%b inst1=%h",
+                                     idx, cycles,
+                                     dut.pre_pc_0, dut.pre_valid[0], dut.pre_inst_0,
+                                     dut.pre_pc_1, dut.pre_valid[1], dut.pre_inst_1);
+                        end
+
+                        if ((dut.rn_valid != 2'b00) &&
+                            (is_debug_pc(dut.rn_pc_0) || is_debug_pc(dut.rn_pc_1))) begin
+                            $display("DBG_RN[%0d] cyc=%0d pc0=%h v0=%b inst0=%h rob0=%0d pc1=%h v1=%b inst1=%h rob1=%0d rn_stall=%b",
+                                     idx, cycles,
+                                     dut.rn_pc_0, dut.rn_valid[0], dut.rn_inst_0, dut.rn_rob_idx_0,
+                                     dut.rn_pc_1, dut.rn_valid[1], dut.rn_inst_1, dut.rn_rob_idx_1,
+                                     dut.rn_stall);
+                        end
+
+                        if ((dut.post_valid != 2'b00) &&
+                            (is_debug_pc(dut.post_pc_0) || is_debug_pc(dut.post_pc_1))) begin
+                            $display("DBG_POST[%0d] cyc=%0d pc0=%h v0=%b inst0=%h fu0=%0d rob0=%0d pc1=%h v1=%b inst1=%h fu1=%0d rob1=%0d issue_stall=%b",
+                                     idx, cycles,
+                                     dut.post_pc_0, dut.post_valid[0], dut.post_inst_0, dut.post_fu_sel_0, dut.post_rob_idx_0,
+                                     dut.post_pc_1, dut.post_valid[1], dut.post_inst_1, dut.post_fu_sel_1, dut.post_rob_idx_1,
+                                     dut.issue_stall);
+                        end
+
+                        if (dut.u_issue.rs_count != 0) begin
+                            for (r = 0; r < dut.u_issue.RS_DEPTH; r = r + 1) begin
+                                if (dut.u_issue.rs_valid[r] && is_debug_pc(dut.u_issue.rs_pc[r])) begin
+                                    $display("DBG_RS_PC[%0d] cyc=%0d idx=%0d pc=%h rob=%0d fu=%0d rdy1=%b rdy2=%b rs1=P%0d rs2=P%0d rd=P%0d",
+                                             idx, cycles, r, dut.u_issue.rs_pc[r], dut.u_issue.rs_rob_idx[r],
+                                             dut.u_issue.rs_fu_sel[r], dut.u_issue.rs_rs1_ready[r], dut.u_issue.rs_rs2_ready[r],
+                                             dut.u_issue.rs_rs1_tag[r], dut.u_issue.rs_rs2_tag[r], dut.u_issue.rs_rd_tag[r]);
+                                end
+                            end
+                        end
+
+                        if ((cycles >= 70) && (cycles <= 220)) begin
+                            if (dut.u_issue.mem_issue_idx != -1) begin
+                                $display("DBG_LSU_PICK[%0d] cyc=%0d mem_idx=%0d pc=%h rob=%0d age=%0d ready=%b is_store=%b lsu_can_issue=%b lsu_busy=%b lsu_pending=%b rob_head=%0d head_pc=%h",
+                                         idx, cycles, dut.u_issue.mem_issue_idx,
+                                         dut.u_issue.rs_pc[dut.u_issue.mem_issue_idx],
+                                         dut.u_issue.rs_rob_idx[dut.u_issue.mem_issue_idx],
+                                         dut.u_issue.rs_age[dut.u_issue.mem_issue_idx],
+                                         (dut.u_issue.rs_rs1_ready[dut.u_issue.mem_issue_idx] && dut.u_issue.rs_rs2_ready[dut.u_issue.mem_issue_idx]),
+                                         !dut.u_issue.rs_mem_is_load[dut.u_issue.mem_issue_idx],
+                                         dut.u_issue.lsu_can_issue, dut.u_issue.lsu_busy, dut.u_issue.lsu_pending,
+                                         dut.rob_head,
+                                         dut.u_regrename.u_rob.entry_pc[dut.rob_head]);
+                            end else begin
+                                $display("DBG_LSU_PICK[%0d] cyc=%0d mem_idx=-1 lsu_can_issue=%b lsu_busy=%b lsu_pending=%b rob_head=%0d head_pc=%h",
+                                         idx, cycles, dut.u_issue.lsu_can_issue, dut.u_issue.lsu_busy, dut.u_issue.lsu_pending,
+                                         dut.rob_head, dut.u_regrename.u_rob.entry_pc[dut.rob_head]);
+                            end
+                            if ((dut.u_issue.mem_issue_idx != -1) &&
+                                !dut.u_issue.rs_mem_is_load[dut.u_issue.mem_issue_idx] &&
+                                !(dut.u_issue.rs_rs1_ready[dut.u_issue.mem_issue_idx] && dut.u_issue.rs_rs2_ready[dut.u_issue.mem_issue_idx]) &&
+                                (dut.u_regrename.u_rob.entry_pc[dut.rob_head] == 32'h0000_1060)) begin
+                                $display("DBG_LSU_CAND[%0d] cyc=%0d head=%0d head_pc=%h (store picked but not ready)",
+                                         idx, cycles, dut.rob_head, dut.u_regrename.u_rob.entry_pc[dut.rob_head]);
+                                for (r = 0; r < dut.u_issue.RS_DEPTH; r = r + 1) begin
+                                    if (dut.u_issue.rs_valid[r] && (dut.u_issue.rs_fu_sel[r] == `FU_DEC_LSU)) begin
+                                        if (dut.u_issue.rs_rob_idx[r] >= dut.rob_head) robd = dut.u_issue.rs_rob_idx[r] - dut.rob_head;
+                                        else robd = dut.u_issue.rs_rob_idx[r] + 32 - dut.rob_head;
+                                        $display("  LSU_RS idx=%0d pc=%h rob=%0d dist=%0d ready=%b is_load=%b rs1=P%0d rs2=P%0d rd=P%0d",
+                                                 r, dut.u_issue.rs_pc[r], dut.u_issue.rs_rob_idx[r], robd,
+                                                 (dut.u_issue.rs_rs1_ready[r] && dut.u_issue.rs_rs2_ready[r]),
+                                                 dut.u_issue.rs_mem_is_load[r],
+                                                 dut.u_issue.rs_rs1_tag[r], dut.u_issue.rs_rs2_tag[r], dut.u_issue.rs_rd_tag[r]);
+                                    end
+                                end
+                            end
+                        end
+                    end
                     if (dut.redirect_valid) begin
-                        $display("TASK_REDIRECT[%0d] cyc=%0d target=%h",
-                                 idx, cycles, dut.redirect_target);
+                        $display("TASK_REDIRECT[%0d] cyc=%0d target=%h inst=%h if_pc=%h",
+                                 idx, cycles, dut.redirect_target, peek_imem_word(dut.redirect_target),
+                                 dut.u_if.reg_PC);
+                        if (idx == DEBUG_TASK_IDX) begin
+                            $display("DBG_REDIRECT_STATE[%0d] issue0=%0d issue1=%0d br0=%b br1=%b br0_mis=%b br1_mis=%b",
+                                     idx, dut.u_issue.issue_idx0, dut.u_issue.issue_idx1,
+                                     dut.u_issue.br0_is_branch, dut.u_issue.br1_is_branch,
+                                     dut.u_issue.br0_mispredict, dut.u_issue.br1_mispredict);
+                            $display("DBG_REDIRECT_ROB[%0d] rob_idx=%0d valid=%b ready=%b pc=%h has_dest=%b arch_rd=%0d new_preg=%0d old_preg=%0d",
+                                     idx, dut.redirect_rob_idx,
+                                     dut.u_regrename.u_rob.entry_valid[dut.redirect_rob_idx],
+                                     dut.u_regrename.u_rob.entry_ready[dut.redirect_rob_idx],
+                                     dut.u_regrename.u_rob.entry_pc[dut.redirect_rob_idx],
+                                     dut.u_regrename.u_rob.entry_has_dest[dut.redirect_rob_idx],
+                                     dut.u_regrename.u_rob.entry_arch_rd[dut.redirect_rob_idx],
+                                     dut.u_regrename.u_rob.entry_new_preg[dut.redirect_rob_idx],
+                                     dut.u_regrename.u_rob.entry_old_preg[dut.redirect_rob_idx]);
+                            if (dut.u_issue.issue_idx0 != -1 && dut.u_issue.br0_is_branch) begin
+                                $display("DBG_BR0[%0d] pc=%h inst=%h imm=%h op=%0d rs1=%h rs2=%h taken=%b target=%h pred_taken=%b pred_target=%h",
+                                         idx, dut.u_issue.rs_pc[dut.u_issue.issue_idx0],
+                                         dut.u_issue.rs_inst[dut.u_issue.issue_idx0],
+                                         dut.u_issue.rs_imm[dut.u_issue.issue_idx0],
+                                         dut.u_issue.rs_branch_op[dut.u_issue.issue_idx0],
+                                         dut.u_issue.rs_rs1_val[dut.u_issue.issue_idx0],
+                                         dut.u_issue.rs_rs2_val[dut.u_issue.issue_idx0],
+                                         dut.u_issue.br0_taken, dut.u_issue.br0_target,
+                                         dut.u_issue.rs_pred_taken[dut.u_issue.issue_idx0],
+                                         dut.u_issue.rs_pred_target[dut.u_issue.issue_idx0]);
+                            end
+                            if (dut.u_issue.issue_idx1 != -1 && dut.u_issue.br1_is_branch) begin
+                                $display("DBG_BR1[%0d] pc=%h inst=%h imm=%h op=%0d rs1=%h rs2=%h taken=%b target=%h pred_taken=%b pred_target=%h",
+                                         idx, dut.u_issue.rs_pc[dut.u_issue.issue_idx1],
+                                         dut.u_issue.rs_inst[dut.u_issue.issue_idx1],
+                                         dut.u_issue.rs_imm[dut.u_issue.issue_idx1],
+                                         dut.u_issue.rs_branch_op[dut.u_issue.issue_idx1],
+                                         dut.u_issue.rs_rs1_val[dut.u_issue.issue_idx1],
+                                         dut.u_issue.rs_rs2_val[dut.u_issue.issue_idx1],
+                                         dut.u_issue.br1_taken, dut.u_issue.br1_target,
+                                         dut.u_issue.rs_pred_taken[dut.u_issue.issue_idx1],
+                                         dut.u_issue.rs_pred_target[dut.u_issue.issue_idx1]);
+                            end
+                            $display("DBG_IMEM_AROUND[%0d] %h=%h %h=%h %h=%h",
+                                     idx,
+                                     start_pc + 32'h0078, peek_imem_word(start_pc + 32'h0078),
+                                     start_pc + 32'h00A4, peek_imem_word(start_pc + 32'h00A4),
+                                     start_pc + 32'h00BC, peek_imem_word(start_pc + 32'h00BC));
+                            $display("DBG_ARCH_REGS[%0d] ra=%h sp=%h s0=%h a0=%h a4=%h a5=%h",
+                                     idx,
+                                     peek_arch_reg(5'd1), peek_arch_reg(5'd2), peek_arch_reg(5'd8),
+                                     peek_arch_reg(5'd10), peek_arch_reg(5'd14), peek_arch_reg(5'd15));
+                        end
+                    end
+                    if (idx == DEBUG_TASK_IDX && dut.u_issue.lsu_valid && !dut.u_issue.lsu_mem_is_load) begin
+                        if (dut.u_issue.lsu_addr >= 32'h0000_1000 && dut.u_issue.lsu_addr < 32'h0000_1100) begin
+                            $display("DBG_CODE_STORE[%0d] cyc=%0d addr=%h wdata=%h mem_op=%0d",
+                                     idx, cycles, dut.u_issue.lsu_addr, dut.u_issue.lsu_wdata,
+                                     dut.u_issue.lsu_mem_op);
+                        end
                     end
                 end
                 if (commit_count < target_commits) begin
@@ -894,6 +1116,44 @@ module Top_tb;
                              dut.if_inst_valid, dut.ib_valid, dut.pre_valid, dut.rn_valid, dut.post_valid,
                              dut.u_issue.rs_count, dut.rob_empty, dut.rn_stall, dut.issue_stall, dut.dispatch_ready,
                              dut.global_flush, dut.redirect_valid, dut.u_if.reg_PC);
+                    if (idx == DEBUG_TASK_IDX) begin
+                        head_in_rs = 1'b0;
+                        for (r = 0; r < dut.u_issue.RS_DEPTH; r = r + 1) begin
+                            if (dut.u_issue.rs_valid[r] && (dut.u_issue.rs_rob_idx[r] == dut.rob_head)) begin
+                                head_in_rs = 1'b1;
+                            end
+                        end
+                        $display("DBG_MAP[%0d] sp=R2->P%0d val=%h ready=%b s0=R8->P%0d val=%h ready=%b a0=R10->P%0d val=%h ready=%b a1=R11->P%0d val=%h ready=%b a4=R14->P%0d val=%h ready=%b a5=R15->P%0d val=%h ready=%b",
+                                 idx,
+                                 dut.u_regrename.int_map[5'd2], dut.u_prf.int_prf[dut.u_regrename.int_map[5'd2]], dut.u_regrename.int_preg_ready[dut.u_regrename.int_map[5'd2]],
+                                 dut.u_regrename.int_map[5'd8], dut.u_prf.int_prf[dut.u_regrename.int_map[5'd8]], dut.u_regrename.int_preg_ready[dut.u_regrename.int_map[5'd8]],
+                                 dut.u_regrename.int_map[5'd10], dut.u_prf.int_prf[dut.u_regrename.int_map[5'd10]], dut.u_regrename.int_preg_ready[dut.u_regrename.int_map[5'd10]],
+                                 dut.u_regrename.int_map[5'd11], dut.u_prf.int_prf[dut.u_regrename.int_map[5'd11]], dut.u_regrename.int_preg_ready[dut.u_regrename.int_map[5'd11]],
+                                 dut.u_regrename.int_map[5'd14], dut.u_prf.int_prf[dut.u_regrename.int_map[5'd14]], dut.u_regrename.int_preg_ready[dut.u_regrename.int_map[5'd14]],
+                                 dut.u_regrename.int_map[5'd15], dut.u_prf.int_prf[dut.u_regrename.int_map[5'd15]], dut.u_regrename.int_preg_ready[dut.u_regrename.int_map[5'd15]]);
+                        $display("DBG_ROB_HEAD[%0d] head=%0d valid=%b ready=%b pc=%h has_dest=%b arch_rd=%0d new_preg=%0d old_preg=%0d",
+                                 idx, dut.rob_head,
+                                 dut.u_regrename.u_rob.entry_valid[dut.rob_head],
+                                 dut.u_regrename.u_rob.entry_ready[dut.rob_head],
+                                 dut.u_regrename.u_rob.entry_pc[dut.rob_head],
+                                 dut.u_regrename.u_rob.entry_has_dest[dut.rob_head],
+                                 dut.u_regrename.u_rob.entry_arch_rd[dut.rob_head],
+                                 dut.u_regrename.u_rob.entry_new_preg[dut.rob_head],
+                                 dut.u_regrename.u_rob.entry_old_preg[dut.rob_head]);
+                        $display("DBG_HEAD_IN_RS[%0d] head=%0d in_rs=%b", idx, dut.rob_head, head_in_rs);
+                        for (r = 0; r < dut.u_issue.RS_DEPTH; r = r + 1) begin
+                            if (dut.u_issue.rs_valid[r]) begin
+                                $display("DBG_RS[%0d] idx=%0d pc=%h inst=%h rob=%0d fu=%0d rs1=P%0d rdy=%b rs2=P%0d rdy=%b imm=%h",
+                                         idx, r, dut.u_issue.rs_pc[r], dut.u_issue.rs_inst[r], dut.u_issue.rs_rob_idx[r],
+                                         dut.u_issue.rs_fu_sel[r], dut.u_issue.rs_rs1_tag[r], dut.u_issue.rs_rs1_ready[r],
+                                         dut.u_issue.rs_rs2_tag[r], dut.u_issue.rs_rs2_ready[r], dut.u_issue.rs_imm[r]);
+                                $display("DBG_RS_RDY[%0d] idx=%0d rs1_preg_ready=%b rs2_preg_ready=%b",
+                                         idx, r,
+                                         dut.u_regrename.int_preg_ready[dut.u_issue.rs_rs1_tag[r]],
+                                         dut.u_regrename.int_preg_ready[dut.u_issue.rs_rs2_tag[r]]);
+                            end
+                        end
+                    end
                     pass = 1'b0;
                 end
             end

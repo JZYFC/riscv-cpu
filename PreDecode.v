@@ -5,6 +5,7 @@
 module PreDecode (
     input clk,
     input rst_n,
+    input stall,
 
     input  wire [`INST_WIDTH-1:0] in_inst_0,
     input  wire [`INST_WIDTH-1:0] in_inst_1,
@@ -297,7 +298,7 @@ always @(posedge clk or negedge rst_n) begin
         out_rs1_is_fp_1<= 1'b0;
         out_rs2_is_fp_1<= 1'b0;
         out_rd_is_fp_1 <= 1'b0;
-    end else begin
+    end else if (!stall) begin
         out_inst_valid <= in_inst_valid;
         out_pred_taken_0 <= in_pred_taken_0;
         out_pred_target_0 <= in_pred_target_0;

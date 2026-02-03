@@ -92,8 +92,9 @@ module Cache (
         endcase
     end
 
-    localparam IDLE = 0, REFILL = 1, WRITEBACK = 2;
+    localparam IDLE = 0, REFILL = 1, WRITEBACK = 2, WRITE_THROUGH = 3;
     reg [1:0] state;
+    integer i;
     
     // Replacement Policy
     wire victim_way;
@@ -107,11 +108,27 @@ module Cache (
     assign stall_cpu = (req && !hit);
     reg [127:0] temp_data; 
     reg [TAG_BITS+1:0] temp_tag;
+    reg [127:0] wt_data;
+    reg [31:0]  wt_addr;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
             valid_out <= 0;
+            mem_req <= 0;
+            mem_we <= 0;
+            mem_addr <= 0;
+            mem_wdata <= 0;
+            rdata <= 0;
+            wt_data <= 0;
+            wt_addr <= 0;
+            for (i = 0; i < SETS; i = i + 1) begin
+                data_way0[i] <= 0;
+                data_way1[i] <= 0;
+                tag_way0[i] <= 0;
+                tag_way1[i] <= 0;
+                lru[i] <= 0;
+            end
         end else begin
             valid_out <= 0;
             mem_req <= 0;
@@ -121,16 +138,14 @@ module Cache (
                 IDLE: begin
                     if (req) begin
                         if (hit) begin
-                            valid_out <= 1;
                             // Update LRU
                             lru[index] <= hit0 ? 1'b1 : 1'b0;
 
-                            // Handle Write Hit
                             if (we) begin
                                 if (hit0) begin
-                                    // Update Dirty bit
+                                    // Write-through: keep line clean
                                     temp_tag = tag_way0[index];
-                                    temp_tag[TAG_BITS+1] = 1'b1;
+                                    temp_tag[TAG_BITS+1] = 1'b0;
                                     tag_way0[index] <= temp_tag;
 
                                     // Handle Write Data: Read-Modify-Write
@@ -165,7 +180,7 @@ module Cache (
                                 end else begin
                                     // Hit Way 1
                                     temp_tag = tag_way1[index];
-                                    temp_tag[TAG_BITS+1] = 1'b1;
+                                    temp_tag[TAG_BITS+1] = 1'b0;
                                     tag_way1[index] <= temp_tag;
 
                                     temp_data = data_way1[index];
@@ -197,6 +212,19 @@ module Cache (
                                     endcase
                                     data_way1[index] <= temp_data;
                                 end
+                                if (paddr[11:4] == 8'hEB) begin
+                                    $display("DBG_DC_STORE_HIT addr=%h offset=%h wdata=%h wstrb=%b line=%h",
+                                             paddr, offset, wdata, wstrb, temp_data);
+                                end
+                                wt_data <= temp_data;
+                                wt_addr <= {paddr[31:4], 4'b0000};
+                                mem_addr <= {paddr[31:4], 4'b0000};
+                                mem_wdata <= temp_data;
+                                mem_req <= 1;
+                                mem_we <= 1;
+                                state <= WRITE_THROUGH;
+                            end else begin
+                                valid_out <= 1;
                             end
                         end else begin
                             // Miss
@@ -232,8 +260,6 @@ module Cache (
 
                 REFILL: begin
                     if (mem_ready) begin
-                        state <= IDLE;
-                        
                         // Fix Bug 2: Merge pending store data if this is a write miss
                         temp_data = mem_rdata;
                         if (we) begin
@@ -267,15 +293,46 @@ module Cache (
 
                         if (victim_way == 0) begin
                             data_way0[index] <= temp_data;
-                            // Set: Dirty=we, Valid=1, Tag=current tag
-                            tag_way0[index]  <= {we, 1'b1, tag};
+                            // Write-through: keep line clean
+                            tag_way0[index]  <= {1'b0, 1'b1, tag};
                         end else begin
                             data_way1[index] <= temp_data;
-                            tag_way1[index]  <= {we, 1'b1, tag};
+                            tag_way1[index]  <= {1'b0, 1'b1, tag};
+                        end
+                        // Update LRU: filled way is MRU, other is LRU
+                        lru[index] <= ~victim_way;
+                        if (we && (paddr[11:4] == 8'hEB)) begin
+                            $display("DBG_DC_REFILL_STORE addr=%h offset=%h wdata=%h wstrb=%b line=%h",
+                                     paddr, offset, wdata, wstrb, temp_data);
+                        end
+                        if (we) begin
+                            wt_data <= temp_data;
+                            wt_addr <= {paddr[31:4], 4'b0000};
+                            mem_addr <= {paddr[31:4], 4'b0000};
+                            mem_wdata <= temp_data;
+                            mem_req <= 1;
+                            mem_we <= 1;
+                            state <= WRITE_THROUGH;
+                        end else begin
+                            state <= IDLE;
                         end
                     end else begin
                         mem_req <= 1;
                         mem_we <= 0;
+                    end
+                end
+                WRITE_THROUGH: begin
+                    if (mem_ready) begin
+                        state <= IDLE;
+                        valid_out <= 1;
+                        if (wt_addr[11:4] == 8'hEB) begin
+                            $display("DBG_DC_WRITE_THROUGH addr=%h line=%h", wt_addr, wt_data);
+                        end
+                    end else begin
+                        mem_req <= 1;
+                        mem_we <= 1;
+                        mem_addr <= wt_addr;
+                        mem_wdata <= wt_data;
                     end
                 end
             endcase

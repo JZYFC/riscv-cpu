@@ -8,6 +8,8 @@ module IssueBuffer #(
     input  wire                         clk,
     input  wire                         rst_n,
     input  wire                         flush,
+    input  wire                         flush_is_redirect,
+    input  wire [`ROB_IDX_WIDTH-1:0]    flush_rob_idx,
 
     // Incoming micro-ops from PostDecode
     input  wire [`IF_BATCH_SIZE-1:0]    in_inst_valid,
@@ -94,6 +96,9 @@ module IssueBuffer #(
     // Backpressure to dispatch
     output wire                         stall_dispatch,
 
+    // ROB head (for non-speculative store issue)
+    input  wire [`ROB_IDX_WIDTH-1:0]    rob_head,
+
     // Writeback outputs to ROB/PRF
     output reg                          wb0_valid,
     output reg  [`ROB_IDX_WIDTH-1:0]    wb0_rob_idx,
@@ -103,6 +108,10 @@ module IssueBuffer #(
     output reg  [`ROB_IDX_WIDTH-1:0]    wb1_rob_idx,
     output reg  [`DATA_WIDTH-1:0]       wb1_value,
     output reg                          wb1_exception,
+    output reg                          wb2_valid,
+    output reg  [`ROB_IDX_WIDTH-1:0]    wb2_rob_idx,
+    output reg  [`DATA_WIDTH-1:0]       wb2_value,
+    output reg                          wb2_exception,
 
     // LSU interface (single outstanding, ordered)
     output reg                          lsu_valid,
@@ -215,7 +224,15 @@ module IssueBuffer #(
     reg [`DATA_WIDTH-1:0] csr_file [0:4095];
 
     wire [2:0] enq_need = {2'b0, in_inst_valid[0]} + {2'b0, in_inst_valid[1]};
-    wire [RS_DEPTH:0] free_slots = RS_DEPTH - rs_count;
+    reg [RS_DEPTH:0] rs_valid_count;
+    integer count_i;
+    always @(*) begin
+        rs_valid_count = 0;
+        for (count_i = 0; count_i < RS_DEPTH; count_i = count_i + 1) begin
+            if (rs_valid[count_i]) rs_valid_count = rs_valid_count + 1'b1;
+        end
+    end
+    wire [RS_DEPTH:0] free_slots = RS_DEPTH - rs_valid_count;
     assign stall_dispatch = (enq_need > free_slots);
 
     // CDB
@@ -335,20 +352,20 @@ module IssueBuffer #(
     );
 
     // Candidate generation (issue0, issue1, divider)
+    wire cand0_has_dest = (rs_rd_tag[issue_idx0] != {`PREG_IDX_WIDTH{1'b0}});
     wire cand0_valid = (issue_idx0 != -1) && rs_valid[issue_idx0] &&
                        (rs_fu_sel[issue_idx0] != `FU_DEC_LSU) &&
-                       !(rs_fu_sel[issue_idx0]==`FU_DEC_MULDIV && rs_muldiv_op[issue_idx0][`ALU_OP_DIV]) &&
-                       (rs_rd_tag[issue_idx0] != {`PREG_IDX_WIDTH{1'b0}});
+                       !(rs_fu_sel[issue_idx0]==`FU_DEC_MULDIV && rs_muldiv_op[issue_idx0][`ALU_OP_DIV]);
     wire [`DATA_WIDTH-1:0] cand0_val = select_result(rs_fu_sel[issue_idx0], alu_res_0, mul_res0, fpu_res0, rs_muldiv_op[issue_idx0], csr_old0, link0);
     wire [`PREG_IDX_WIDTH-1:0] cand0_tag = rs_rd_tag[issue_idx0];
     wire [`ROB_IDX_WIDTH-1:0]  cand0_rob = rs_rob_idx[issue_idx0];
     wire cand0_is_fp = rs_rd_is_fp[issue_idx0];
     wire cand0_exc   = rs_illegal[issue_idx0];
 
+    wire cand1_has_dest = (rs_rd_tag[issue_idx1] != {`PREG_IDX_WIDTH{1'b0}});
     wire cand1_valid = (issue_idx1 != -1) && rs_valid[issue_idx1] &&
                        (rs_fu_sel[issue_idx1] != `FU_DEC_LSU) &&
-                       !(rs_fu_sel[issue_idx1]==`FU_DEC_MULDIV && rs_muldiv_op[issue_idx1][`ALU_OP_DIV]) &&
-                       (rs_rd_tag[issue_idx1] != {`PREG_IDX_WIDTH{1'b0}});
+                       !(rs_fu_sel[issue_idx1]==`FU_DEC_MULDIV && rs_muldiv_op[issue_idx1][`ALU_OP_DIV]);
     wire [`DATA_WIDTH-1:0] cand1_val = select_result(rs_fu_sel[issue_idx1], alu_res_1, mul_res1, fpu_res1, rs_muldiv_op[issue_idx1], csr_old1, link1);
     wire [`PREG_IDX_WIDTH-1:0] cand1_tag = rs_rd_tag[issue_idx1];
     wire [`ROB_IDX_WIDTH-1:0]  cand1_rob = rs_rob_idx[issue_idx1];
@@ -373,44 +390,71 @@ module IssueBuffer #(
     wire cand2_is_fp = div_dest_is_fp;
     wire cand2_exc   = div_exception;
 
-    wire cand3_valid = lsu_wb_valid;
+    wire cand3_has_dest = (lsu_wb_dest_tag != {`PREG_IDX_WIDTH{1'b0}});
+    wire cand3_valid = lsu_wb_valid && cand3_has_dest;
     wire [`DATA_WIDTH-1:0]    cand3_val = lsu_wb_value;
     wire [`PREG_IDX_WIDTH-1:0] cand3_tag = lsu_wb_dest_tag;
     wire [`ROB_IDX_WIDTH-1:0]  cand3_rob = lsu_wb_rob_idx;
     wire cand3_is_fp = lsu_wb_dest_is_fp;
     wire cand3_exc   = lsu_wb_exception;
-    wire cand3_has_dest = (cand3_tag != {`PREG_IDX_WIDTH{1'b0}});
+    wire lsu_nodest_valid = lsu_wb_valid && !cand3_has_dest;
 
-    // Ready mask and selection (LSU ordered, single outstanding)
+    // Ready mask and selection (LSU strictly ordered, single outstanding)
     reg [RS_DEPTH-1:0] base_ready_mask;
     reg [RS_DEPTH-1:0] issue_ready_mask;
     integer rm;
     integer best_age0, best_age1;
     integer mem_issue_idx;
     integer mem_best_age;
-    reg lsu_can_issue;
+    integer rob_dist;
+    reg     mem_issue_ready;
+    reg     mem_issue_is_store;
+    reg     lsu_pending;
+    reg     lsu_can_issue;
     wire allow_issue1 = !lsu_wb_valid;
+
+    function in_range_inclusive;
+        input [`ROB_IDX_WIDTH-1:0] idx;
+        input [`ROB_IDX_WIDTH-1:0] start;
+        input [`ROB_IDX_WIDTH-1:0] var_end;
+        begin
+            if (start <= var_end) in_range_inclusive = (idx >= start) && (idx <= var_end);
+            else in_range_inclusive = (idx >= start) || (idx <= var_end);
+        end
+    endfunction
     always @(*) begin
         base_ready_mask = {RS_DEPTH{1'b0}};
         for (rm = 0; rm < RS_DEPTH; rm = rm + 1) begin
             base_ready_mask[rm] = rs_valid[rm] && rs_rs1_ready[rm] && rs_rs2_ready[rm];
         end
 
+        // Find oldest LSU op using ROB order (avoid age counter wrap issues)
         mem_issue_idx = -1; mem_best_age = 0;
         for (rm = 0; rm < RS_DEPTH; rm = rm + 1) begin
-            if (base_ready_mask[rm] && (rs_fu_sel[rm] == `FU_DEC_LSU)) begin
-                if (mem_issue_idx == -1 || rs_age[rm] < mem_best_age) begin
+            if (rs_valid[rm] && (rs_fu_sel[rm] == `FU_DEC_LSU)) begin
+                if (rs_rob_idx[rm] >= rob_head) rob_dist = rs_rob_idx[rm] - rob_head;
+                else rob_dist = rs_rob_idx[rm] + `ROB_SIZE - rob_head;
+                if (mem_issue_idx == -1 || rob_dist < mem_best_age) begin
                     mem_issue_idx = rm;
-                    mem_best_age = rs_age[rm];
+                    mem_best_age = rob_dist;
                 end
             end
         end
-        lsu_can_issue = (mem_issue_idx != -1) && !lsu_busy;
+        mem_issue_ready = (mem_issue_idx != -1) && rs_rs1_ready[mem_issue_idx] && rs_rs2_ready[mem_issue_idx];
+        mem_issue_is_store = (mem_issue_idx != -1) && !rs_mem_is_load[mem_issue_idx];
+        // lsu_busy is sampled a cycle late by the IssueBuffer (registered interface),
+        // so block a new request while a request is pending acceptance.
+        lsu_can_issue = mem_issue_ready && !lsu_busy && !lsu_pending;
+        // Stores are only allowed to issue when they reach ROB head (avoid wrong-path stores)
+        if (mem_issue_is_store) begin
+            lsu_can_issue = lsu_can_issue && (rs_rob_idx[mem_issue_idx] == rob_head);
+        end
 
         issue_ready_mask = {RS_DEPTH{1'b0}};
         for (rm = 0; rm < RS_DEPTH; rm = rm + 1) begin
             issue_ready_mask[rm] = base_ready_mask[rm] &&
-                                   ((rs_fu_sel[rm] != `FU_DEC_LSU) || (lsu_can_issue && (rm == mem_issue_idx)));
+                                   ((rs_fu_sel[rm] != `FU_DEC_LSU) || (lsu_can_issue && (rm == mem_issue_idx))) &&
+                                   ((rs_fu_sel[rm] != `FU_DEC_BRANCH) || (rs_rob_idx[rm] == rob_head));
         end
 
         issue_idx0 = -1; best_age0 = 0;
@@ -423,7 +467,7 @@ module IssueBuffer #(
             end
         end
         issue_idx1 = -1; best_age1 = 0;
-        if (allow_issue1) begin
+        if (allow_issue1 && !((issue_idx0 != -1) && (rs_fu_sel[issue_idx0] == `FU_DEC_BRANCH))) begin
             for (rm = 0; rm < RS_DEPTH; rm = rm + 1) begin
                 if (issue_ready_mask[rm] && rm != issue_idx0) begin
                     if (issue_idx1 == -1 || rs_age[rm] < best_age1) begin
@@ -516,10 +560,11 @@ module IssueBuffer #(
     endfunction
 
     always @(*) begin
-        wb0_valid = 1'b0; wb1_valid = 1'b0;
+        wb0_valid = 1'b0; wb1_valid = 1'b0; wb2_valid = 1'b0;
         wb0_rob_idx = {`ROB_IDX_WIDTH{1'b0}}; wb1_rob_idx = {`ROB_IDX_WIDTH{1'b0}};
-        wb0_value = {`DATA_WIDTH{1'b0}}; wb1_value = {`DATA_WIDTH{1'b0}};
-        wb0_exception = 1'b0; wb1_exception = 1'b0;
+        wb2_rob_idx = {`ROB_IDX_WIDTH{1'b0}};
+        wb0_value = {`DATA_WIDTH{1'b0}}; wb1_value = {`DATA_WIDTH{1'b0}}; wb2_value = {`DATA_WIDTH{1'b0}};
+        wb0_exception = 1'b0; wb1_exception = 1'b0; wb2_exception = 1'b0;
         wb0_dest_tag = {`PREG_IDX_WIDTH{1'b0}}; wb1_dest_tag = {`PREG_IDX_WIDTH{1'b0}}; div_dest_tag = {`PREG_IDX_WIDTH{1'b0}};
         wb0_dest_valid = 1'b0; wb1_dest_valid = 1'b0; div_dest_valid = 1'b0;
         wb0_dest_is_fp = 1'b0; wb1_dest_is_fp = 1'b0; div_dest_is_fp = 1'b0;
@@ -528,6 +573,12 @@ module IssueBuffer #(
         cdb0_value = {`DATA_WIDTH{1'b0}}; cdb1_value = {`DATA_WIDTH{1'b0}};
 
         pick = 0;
+        if (lsu_nodest_valid) begin
+            wb2_valid     = 1'b1;
+            wb2_value     = lsu_wb_value;
+            wb2_rob_idx   = lsu_wb_rob_idx;
+            wb2_exception = lsu_wb_exception;
+        end
         if (cand3_valid && pick < 2) begin
             wb0_valid     = 1'b1;
             wb0_value     = cand3_val;
@@ -550,22 +601,26 @@ module IssueBuffer #(
                 wb0_rob_idx   = cand0_rob;
                 wb0_exception = cand0_exc;
                 wb0_dest_tag  = cand0_tag;
-                wb0_dest_valid= 1'b1;
+                wb0_dest_valid= cand0_has_dest;
                 wb0_dest_is_fp= cand0_is_fp;
-                cdb0_valid    = 1'b1;
-                cdb0_tag      = cand0_tag;
-                cdb0_value    = cand0_val;
+                if (cand0_has_dest) begin
+                    cdb0_valid    = 1'b1;
+                    cdb0_tag      = cand0_tag;
+                    cdb0_value    = cand0_val;
+                end
             end else begin
                 wb1_valid     = 1'b1;
                 wb1_value     = cand0_val;
                 wb1_rob_idx   = cand0_rob;
                 wb1_exception = cand0_exc;
                 wb1_dest_tag  = cand0_tag;
-                wb1_dest_valid= 1'b1;
+                wb1_dest_valid= cand0_has_dest;
                 wb1_dest_is_fp= cand0_is_fp;
-                cdb1_valid    = 1'b1;
-                cdb1_tag      = cand0_tag;
-                cdb1_value    = cand0_val;
+                if (cand0_has_dest) begin
+                    cdb1_valid    = 1'b1;
+                    cdb1_tag      = cand0_tag;
+                    cdb1_value    = cand0_val;
+                end
             end
             pick = pick + 1;
         end
@@ -576,22 +631,26 @@ module IssueBuffer #(
                 wb0_rob_idx   = cand1_rob;
                 wb0_exception = cand1_exc;
                 wb0_dest_tag  = cand1_tag;
-                wb0_dest_valid= 1'b1;
+                wb0_dest_valid= cand1_has_dest;
                 wb0_dest_is_fp= cand1_is_fp;
-                cdb0_valid    = 1'b1;
-                cdb0_tag      = cand1_tag;
-                cdb0_value    = cand1_val;
+                if (cand1_has_dest) begin
+                    cdb0_valid    = 1'b1;
+                    cdb0_tag      = cand1_tag;
+                    cdb0_value    = cand1_val;
+                end
             end else begin
                 wb1_valid     = 1'b1;
                 wb1_value     = cand1_val;
                 wb1_rob_idx   = cand1_rob;
                 wb1_exception = cand1_exc;
                 wb1_dest_tag  = cand1_tag;
-                wb1_dest_valid= 1'b1;
+                wb1_dest_valid= cand1_has_dest;
                 wb1_dest_is_fp= cand1_is_fp;
-                cdb1_valid    = 1'b1;
-                cdb1_tag      = cand1_tag;
-                cdb1_value    = cand1_val;
+                if (cand1_has_dest) begin
+                    cdb1_valid    = 1'b1;
+                    cdb1_tag      = cand1_tag;
+                    cdb1_value    = cand1_val;
+                end
             end
             pick = pick + 1;
         end
@@ -629,6 +688,7 @@ module IssueBuffer #(
     integer enq_cnt;
     integer found_idx0;
     integer found_idx1;
+    integer new_count;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -638,9 +698,10 @@ module IssueBuffer #(
                 rs_valid[i_idx] <= 1'b0;
             end
             i_wr_we0 <= 1'b0; i_wr_we1 <= 1'b0; f_wr_we0 <= 1'b0; f_wr_we1 <= 1'b0;
-            wb0_valid <= 1'b0; wb1_valid <= 1'b0;
+            wb0_valid <= 1'b0; wb1_valid <= 1'b0; wb2_valid <= 1'b0;
             wb0_exception <= 1'b0; wb1_exception <= 1'b0;
             lsu_valid <= 1'b0;
+            lsu_pending <= 1'b0;
             lsu_addr <= 32'b0;
             lsu_wdata <= 32'b0;
             lsu_mem_op <= {`MEM_OP_WIDTH{1'b0}};
@@ -660,17 +721,11 @@ module IssueBuffer #(
             bp_update0_is_call <= 1'b0; bp_update1_is_call <= 1'b0;
             bp_update0_is_return <= 1'b0; bp_update1_is_return <= 1'b0;
         end else if (flush) begin
-            rs_count <= 0;
-            age_counter <= 0;
-            for (i_idx = 0; i_idx < RS_DEPTH; i_idx = i_idx + 1) begin
-                rs_valid[i_idx] <= 1'b0;
-                rs_rs1_ready[i_idx] <= 1'b0;
-                rs_rs2_ready[i_idx] <= 1'b0;
-            end
             i_wr_we0 <= 1'b0; i_wr_we1 <= 1'b0; f_wr_we0 <= 1'b0; f_wr_we1 <= 1'b0;
-            wb0_valid <= 1'b0; wb1_valid <= 1'b0;
+            wb0_valid <= 1'b0; wb1_valid <= 1'b0; wb2_valid <= 1'b0;
             wb0_exception <= 1'b0; wb1_exception <= 1'b0;
             lsu_valid <= 1'b0;
+            lsu_pending <= 1'b0;
             redirect_valid <= 1'b0;
             redirect_target <= {`INST_ADDR_WIDTH{1'b0}};
             redirect_rob_idx <= {`ROB_IDX_WIDTH{1'b0}};
@@ -681,6 +736,33 @@ module IssueBuffer #(
             bp_update0_hist <= {`BP_GHR_BITS{1'b0}}; bp_update1_hist <= {`BP_GHR_BITS{1'b0}};
             bp_update0_is_call <= 1'b0; bp_update1_is_call <= 1'b0;
             bp_update0_is_return <= 1'b0; bp_update1_is_return <= 1'b0;
+            if (flush_is_redirect) begin
+                new_count = 0;
+                for (i_idx = 0; i_idx < RS_DEPTH; i_idx = i_idx + 1) begin
+                    if (rs_valid[i_idx] && in_range_inclusive(rs_rob_idx[i_idx], rob_head, flush_rob_idx)) begin
+                        new_count = new_count + 1;
+                    end else begin
+                        rs_valid[i_idx] <= 1'b0;
+                        rs_rs1_ready[i_idx] <= 1'b0;
+                        rs_rs2_ready[i_idx] <= 1'b0;
+                    end
+                end
+                rs_count <= new_count;
+                if (div_busy && !in_range_inclusive(div_rob_idx, rob_head, flush_rob_idx)) begin
+                    div_busy <= 1'b0;
+                    div_done <= 1'b0;
+                end
+            end else begin
+                rs_count <= 0;
+                age_counter <= 0;
+                for (i_idx = 0; i_idx < RS_DEPTH; i_idx = i_idx + 1) begin
+                    rs_valid[i_idx] <= 1'b0;
+                    rs_rs1_ready[i_idx] <= 1'b0;
+                    rs_rs2_ready[i_idx] <= 1'b0;
+                end
+                div_busy <= 1'b0;
+                div_done <= 1'b0;
+            end
         end else begin
             // CSR writes
             if (csr_we0 && issue_idx0 != -1) csr_file[rs_csr_addr[issue_idx0]] <= csr_new0;
@@ -689,6 +771,15 @@ module IssueBuffer #(
             // Default PRF writes low
             i_wr_we0 <= 1'b0; i_wr_we1 <= 1'b0; f_wr_we0 <= 1'b0; f_wr_we1 <= 1'b0;
             lsu_valid <= 1'b0;
+
+            // Track LSU request in flight until LSU actually goes busy (registered accept).
+            if (lsu_pending) begin
+                if (lsu_busy || lsu_wb_valid) begin
+                    lsu_pending <= 1'b0;
+                end
+            end else if (lsu_can_issue) begin
+                lsu_pending <= 1'b1;
+            end
 
             // PRF writes from WB
             if (wb0_valid && wb0_dest_valid) begin

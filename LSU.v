@@ -91,6 +91,16 @@ module LSU (
         endcase
     end
 
+    // Misaligned access detection
+    reg misaligned_in;
+    always @(*) begin
+        case (mem_op)
+            `MEM_OP_LW, `MEM_OP_SW: misaligned_in = |addr[1:0];
+            `MEM_OP_LH, `MEM_OP_LHU, `MEM_OP_SH: misaligned_in = addr[0];
+            default: misaligned_in = 1'b0;
+        endcase
+    end
+
     Cache u_cache (
         .clk(clk), .rst_n(rst_n),
         // CPU ²à
@@ -146,20 +156,31 @@ module LSU (
             if (flush) begin
                 state <= IDLE;
                 wb_valid <= 0;
+                wb_exception <= 0;
             end else begin
                 case (state)
                     IDLE: begin
                         wb_valid <= 0;
                         if (valid_in) begin
-                            addr_reg <= addr;
-                            wdata_reg <= wdata;
-                            mem_op_reg <= mem_op;
-                            mem_is_load_reg <= mem_is_load;
-                            mem_unsigned_reg <= mem_unsigned;
-                            rob_idx_reg <= rob_idx_in;
-                            rd_tag_reg <= rd_tag_in;
-                            rd_is_fp_reg <= rd_is_fp_in;
-                            state <= WAIT_CACHE;
+                            if (misaligned_in) begin
+                                wb_valid <= 1;
+                                wb_value <= 32'b0;
+                                wb_rob_idx <= rob_idx_in;
+                                wb_dest_tag <= rd_tag_in;
+                                wb_dest_is_fp <= rd_is_fp_in;
+                                wb_exception <= 1'b1;
+                                state <= IDLE;
+                            end else begin
+                                addr_reg <= addr;
+                                wdata_reg <= wdata;
+                                mem_op_reg <= mem_op;
+                                mem_is_load_reg <= mem_is_load;
+                                mem_unsigned_reg <= mem_unsigned;
+                                rob_idx_reg <= rob_idx_in;
+                                rd_tag_reg <= rd_tag_in;
+                                rd_is_fp_reg <= rd_is_fp_in;
+                                state <= WAIT_CACHE;
+                            end
                         end
                     end
                     WAIT_CACHE: begin

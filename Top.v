@@ -36,6 +36,7 @@ wire [`DATA_WIDTH-1:0] commit1_value;
 wire commit0_exception;
 wire commit1_exception;
 wire rob_empty;
+wire [`ROB_IDX_WIDTH-1:0] rob_head;
 wire rn_stall;
 
 wire commit_exc = commit0_exception;
@@ -266,6 +267,7 @@ wire [`BP_GHR_BITS-1:0] pre_pred_hist_0, pre_pred_hist_1;
 PreDecode u_predecode (
     .clk(clk),
     .rst_n(rst_n),
+    .stall(issue_stall),
     .in_inst_0(ib_inst_0),
     .in_inst_1(ib_inst_1),
     .in_pc_0(ib_pc_0),
@@ -362,12 +364,16 @@ wire rn_old_rd_preg_valid_1;
 // Writeback wires from execute/issue
 wire wb0_valid_exe;
 wire wb1_valid_exe;
+wire wb2_valid_exe;
 wire [`ROB_IDX_WIDTH-1:0] wb0_rob_idx_exe;
 wire [`ROB_IDX_WIDTH-1:0] wb1_rob_idx_exe;
+wire [`ROB_IDX_WIDTH-1:0] wb2_rob_idx_exe;
 wire [`DATA_WIDTH-1:0] wb0_value_exe;
 wire [`DATA_WIDTH-1:0] wb1_value_exe;
+wire [`DATA_WIDTH-1:0] wb2_value_exe;
 wire wb0_exception_exe;
 wire wb1_exception_exe;
+wire wb2_exception_exe;
 wire lsu_valid;
 wire [31:0] lsu_addr;
 wire [31:0] lsu_wdata;
@@ -389,9 +395,11 @@ RegRename u_regrename (
     .clk(clk),
     .rst_n(rst_n),
     .flush(global_flush),
+    .flush_is_redirect(redirect_valid),
     .flush_rob_idx(redirect_valid ? redirect_rob_idx :
                                (commit_exc ? commit0_rob_idx : {`ROB_IDX_WIDTH{1'b0}})),
-    .in_inst_valid(pre_valid),
+    .stall(issue_stall),
+    .in_inst_valid(pre_valid & {`IF_BATCH_SIZE{~issue_stall}}),
     .in_pc_0(pre_pc_0),
     .in_pc_1(pre_pc_1),
     .in_inst_0(pre_inst_0),
@@ -428,6 +436,10 @@ RegRename u_regrename (
     .wb1_rob_idx(wb1_rob_idx_exe),
     .wb1_value(wb1_value_exe),
     .wb1_exception(wb1_exception_exe),
+    .wb2_valid(wb2_valid_exe),
+    .wb2_rob_idx(wb2_rob_idx_exe),
+    .wb2_value(wb2_value_exe),
+    .wb2_exception(wb2_exception_exe),
     .out_inst_valid(rn_valid),
     .out_inst_0(rn_inst_0),
     .out_inst_1(rn_inst_1),
@@ -498,6 +510,7 @@ RegRename u_regrename (
     .commit1_value(commit1_value),
     .commit1_exception(commit1_exception),
     .rob_empty(rob_empty),
+    .rob_head(rob_head),
     .rename_stall(rn_stall)
 );
 
@@ -592,6 +605,7 @@ wire post_illegal_1;
 PostDecode u_postdecode (
     .clk(clk),
     .rst_n(rst_n),
+    .stall(issue_stall),
     .in_inst_valid(rn_valid),
     .in_inst_0(rn_inst_0),
     .in_inst_1(rn_inst_1),
@@ -775,6 +789,8 @@ IssueBuffer u_issue (
     .clk(clk),
     .rst_n(rst_n),
     .flush(global_flush),
+    .flush_is_redirect(redirect_valid),
+    .flush_rob_idx(redirect_rob_idx),
     .in_inst_valid(post_valid),
     .in_pred_taken_0(post_pred_taken_0),
     .in_pred_target_0(post_pred_target_0),
@@ -854,6 +870,7 @@ IssueBuffer u_issue (
     .in_csr_addr_1(post_csr_addr_1),
     .in_fp_op_1(post_fp_op_1),
     .in_illegal_1(post_illegal_1),
+    .rob_head(rob_head),
     .stall_dispatch(issue_stall),
     .wb0_valid(wb0_valid_exe),
     .wb0_rob_idx(wb0_rob_idx_exe),
@@ -863,6 +880,10 @@ IssueBuffer u_issue (
     .wb1_rob_idx(wb1_rob_idx_exe),
     .wb1_value(wb1_value_exe),
     .wb1_exception(wb1_exception_exe),
+    .wb2_valid(wb2_valid_exe),
+    .wb2_rob_idx(wb2_rob_idx_exe),
+    .wb2_value(wb2_value_exe),
+    .wb2_exception(wb2_exception_exe),
     .lsu_valid(lsu_valid),
     .lsu_addr(lsu_addr),
     .lsu_wdata(lsu_wdata),

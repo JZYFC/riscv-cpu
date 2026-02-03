@@ -43,6 +43,22 @@ module ROB #(
     input  wire [`DATA_WIDTH-1:0]      wb1_value,
     input  wire                        wb1_exception,
 
+    input  wire                        wb2_valid,
+    input  wire [ROB_IDX_WIDTH-1:0]    wb2_rob_idx,
+    input  wire [`DATA_WIDTH-1:0]      wb2_value,
+    input  wire                        wb2_exception,
+
+    // WB destination tags (for scoreboard)
+    output wire                        wb0_has_dest,
+    output wire                        wb0_is_float,
+    output wire [PREG_IDX_WIDTH-1:0]   wb0_new_preg,
+    output wire                        wb1_has_dest,
+    output wire                        wb1_is_float,
+    output wire [PREG_IDX_WIDTH-1:0]   wb1_new_preg,
+    output wire                        wb2_has_dest,
+    output wire                        wb2_is_float,
+    output wire [PREG_IDX_WIDTH-1:0]   wb2_new_preg,
+
     // Commit (2 per cycle)
     output reg                         commit0_valid,
     output reg  [ROB_IDX_WIDTH-1:0]    commit0_rob_idx,
@@ -68,7 +84,10 @@ module ROB #(
 
     // Flush
     input  wire                        flush,
-    output wire                        rob_empty
+    input  wire                        flush_is_redirect,
+    input  wire [ROB_IDX_WIDTH-1:0]    flush_rob_idx,
+    output wire                        rob_empty,
+    output wire [ROB_IDX_WIDTH-1:0]    rob_head
 );
     reg                        entry_valid       [0:ROB_SIZE-1];
     reg                        entry_ready       [0:ROB_SIZE-1];
@@ -91,11 +110,40 @@ module ROB #(
     reg [1:0]               commit_num;
 
     assign rob_empty = (count == 0);
+    assign rob_head = head;
+    assign wb0_has_dest = wb0_valid && entry_valid[wb0_rob_idx] && entry_has_dest[wb0_rob_idx];
+    assign wb0_is_float = (wb0_valid && entry_valid[wb0_rob_idx]) ? entry_is_float[wb0_rob_idx] : 1'b0;
+    assign wb0_new_preg = (wb0_valid && entry_valid[wb0_rob_idx]) ? entry_new_preg[wb0_rob_idx] : {PREG_IDX_WIDTH{1'b0}};
+    assign wb1_has_dest = wb1_valid && entry_valid[wb1_rob_idx] && entry_has_dest[wb1_rob_idx];
+    assign wb1_is_float = (wb1_valid && entry_valid[wb1_rob_idx]) ? entry_is_float[wb1_rob_idx] : 1'b0;
+    assign wb1_new_preg = (wb1_valid && entry_valid[wb1_rob_idx]) ? entry_new_preg[wb1_rob_idx] : {PREG_IDX_WIDTH{1'b0}};
+    assign wb2_has_dest = wb2_valid && entry_valid[wb2_rob_idx] && entry_has_dest[wb2_rob_idx];
+    assign wb2_is_float = (wb2_valid && entry_valid[wb2_rob_idx]) ? entry_is_float[wb2_rob_idx] : 1'b0;
+    assign wb2_new_preg = (wb2_valid && entry_valid[wb2_rob_idx]) ? entry_new_preg[wb2_rob_idx] : {PREG_IDX_WIDTH{1'b0}};
 
     function [ROB_IDX_WIDTH-1:0] ptr_inc;
         input [ROB_IDX_WIDTH-1:0] ptr;
         begin
             ptr_inc = (ptr == ROB_SIZE-1) ? {ROB_IDX_WIDTH{1'b0}} : ptr + 1'b1;
+        end
+    endfunction
+
+    function [ROB_IDX_WIDTH:0] ring_count;
+        input [ROB_IDX_WIDTH-1:0] from;
+        input [ROB_IDX_WIDTH-1:0] to;
+        begin
+            if (to >= from) ring_count = to - from + 1'b1;
+            else ring_count = (ROB_SIZE - from) + to + 1'b1;
+        end
+    endfunction
+
+    function in_range;
+        input [ROB_IDX_WIDTH-1:0] idx;
+        input [ROB_IDX_WIDTH-1:0] start;
+        input [ROB_IDX_WIDTH-1:0] var_end;
+        begin
+            if (start <= var_end) in_range = (idx >= start) && (idx < var_end);
+            else in_range = (idx >= start) || (idx < var_end);
         end
     endfunction
 
@@ -129,11 +177,23 @@ module ROB #(
             commit0_valid <= 1'b0; commit1_valid <= 1'b0;
             commit0_exception <= 1'b0; commit1_exception <= 1'b0;
             if (flush) begin
-                head <= {ROB_IDX_WIDTH{1'b0}}; tail <= {ROB_IDX_WIDTH{1'b0}}; count <= {(ROB_IDX_WIDTH+1){1'b0}};
                 commit0_rob_idx <= {ROB_IDX_WIDTH{1'b0}};
                 commit1_rob_idx <= {ROB_IDX_WIDTH{1'b0}};
-                for (i=0;i<ROB_SIZE;i=i+1) begin
-                    entry_valid[i]<=1'b0; entry_ready[i]<=1'b0; entry_exception[i]<=1'b0;
+                if (flush_is_redirect && entry_valid[flush_rob_idx]) begin
+                    for (i=0;i<ROB_SIZE;i=i+1) begin
+                        if (in_range(i[ROB_IDX_WIDTH-1:0], ptr_inc(flush_rob_idx), tail)) begin
+                            entry_valid[i]<=1'b0;
+                            entry_ready[i]<=1'b0;
+                            entry_exception[i]<=1'b0;
+                        end
+                    end
+                    tail  <= ptr_inc(flush_rob_idx);
+                    count <= ring_count(head, flush_rob_idx);
+                end else begin
+                    head <= {ROB_IDX_WIDTH{1'b0}}; tail <= {ROB_IDX_WIDTH{1'b0}}; count <= {(ROB_IDX_WIDTH+1){1'b0}};
+                    for (i=0;i<ROB_SIZE;i=i+1) begin
+                        entry_valid[i]<=1'b0; entry_ready[i]<=1'b0; entry_exception[i]<=1'b0;
+                    end
                 end
             end else begin
                 if (wb0_valid) begin
@@ -145,6 +205,11 @@ module ROB #(
                     entry_value[wb1_rob_idx]     <= wb1_value;
                     entry_ready[wb1_rob_idx]     <= 1'b1;
                     entry_exception[wb1_rob_idx] <= wb1_exception;
+                end
+                if (wb2_valid) begin
+                    entry_value[wb2_rob_idx]     <= wb2_value;
+                    entry_ready[wb2_rob_idx]     <= 1'b1;
+                    entry_exception[wb2_rob_idx] <= wb2_exception;
                 end
 
                 tail_next  = tail;
@@ -236,7 +301,9 @@ module RegRename #(
     input  wire                        clk,
     input  wire                        rst_n,
     input  wire                        flush,
+    input  wire                        flush_is_redirect,
     input  wire [`ROB_IDX_WIDTH-1:0]   flush_rob_idx,
+    input  wire                        stall,
 
     // Incoming pre-decode info (2 instructions)
     input  wire [`IF_BATCH_SIZE-1:0]   in_inst_valid,
@@ -278,6 +345,11 @@ module RegRename #(
     input  wire [`ROB_IDX_WIDTH-1:0]   wb1_rob_idx,
     input  wire [`DATA_WIDTH-1:0]      wb1_value,
     input  wire                        wb1_exception,
+
+    input  wire                        wb2_valid,
+    input  wire [`ROB_IDX_WIDTH-1:0]   wb2_rob_idx,
+    input  wire [`DATA_WIDTH-1:0]      wb2_value,
+    input  wire                        wb2_exception,
 
     // Renamed outputs to dispatch
     output reg  [`IF_BATCH_SIZE-1:0]   out_inst_valid,
@@ -352,6 +424,7 @@ module RegRename #(
     output wire [`DATA_WIDTH-1:0]      commit1_value,
     output wire                        commit1_exception,
     output wire                        rob_empty,
+    output wire [`ROB_IDX_WIDTH-1:0]   rob_head,
 
     output wire                        rename_stall
 );
@@ -366,8 +439,10 @@ reg [`PREG_IDX_WIDTH-1:0] int_map [0:ARCH_REGS-1];
 reg                       int_map_valid [0:ARCH_REGS-1];
 reg [`PREG_IDX_WIDTH-1:0] fp_map  [0:ARCH_REGS-1];
 reg                       fp_map_valid  [0:ARCH_REGS-1];
+reg                       int_preg_ready [0:INT_PREG_COUNT-1];
+reg                       fp_preg_ready  [0:FP_PREG_COUNT-1];
 
-// Checkpoints per ROB entry (coarse: snapshot before allocation)
+// Checkpoints per ROB entry (snapshot after allocation)
 reg [`PREG_IDX_WIDTH-1:0] int_map_cp    [0:`ROB_SIZE-1][0:ARCH_REGS-1];
 reg                       int_map_v_cp  [0:`ROB_SIZE-1][0:ARCH_REGS-1];
 reg [`PREG_IDX_WIDTH-1:0] fp_map_cp     [0:`ROB_SIZE-1][0:ARCH_REGS-1];
@@ -390,6 +465,27 @@ reg [`PREG_IDX_WIDTH:0]   int_free_head_next;
 reg [`PREG_IDX_WIDTH:0]   fp_free_head_next;
 reg [`PREG_IDX_WIDTH:0]   int_free_count_next;
 reg [`PREG_IDX_WIDTH:0]   fp_free_count_next;
+reg [INT_PREG_COUNT-1:0]  int_used;
+reg [FP_PREG_COUNT-1:0]   fp_used;
+function in_range_inclusive;
+    input [`ROB_IDX_WIDTH-1:0] idx;
+    input [`ROB_IDX_WIDTH-1:0] start;
+    input [`ROB_IDX_WIDTH-1:0] var_end;
+    begin
+        if (start <= var_end) in_range_inclusive = (idx >= start) && (idx <= var_end);
+        else in_range_inclusive = (idx >= start) || (idx <= var_end);
+    end
+endfunction
+
+// Map snapshots after allocation (combinational helpers)
+reg [`PREG_IDX_WIDTH-1:0] int_map_after0 [0:ARCH_REGS-1];
+reg [`PREG_IDX_WIDTH-1:0] int_map_after1 [0:ARCH_REGS-1];
+reg                       int_map_v_after0 [0:ARCH_REGS-1];
+reg                       int_map_v_after1 [0:ARCH_REGS-1];
+reg [`PREG_IDX_WIDTH-1:0] fp_map_after0  [0:ARCH_REGS-1];
+reg [`PREG_IDX_WIDTH-1:0] fp_map_after1  [0:ARCH_REGS-1];
+reg                       fp_map_v_after0 [0:ARCH_REGS-1];
+reg                       fp_map_v_after1 [0:ARCH_REGS-1];
 
 // ROB alloc wires
 wire alloc0_ready;
@@ -415,6 +511,10 @@ wire fp_can_alloc  = (fp_free_count  >= fp_need_count);
 
 assign rename_stall = (!int_can_alloc) || (!fp_can_alloc) ||
                       (rob_req0 && !alloc0_ready) || (rob_req1 && !alloc1_ready);
+
+// Only allow ROB allocation when the whole rename stage is actually accepting inputs.
+// This prevents allocating entries that never reach IssueBuffer when rename_stall is asserted.
+wire rename_fire = !rename_stall && !stall;
 
 function [`PREG_IDX_WIDTH-1:0] int_free_peek;
     input [`PREG_IDX_WIDTH:0] head;
@@ -458,18 +558,93 @@ wire [`PREG_IDX_WIDTH-1:0] rs1_tag1 = (has_dest0 && same_dest_type && (in_rs1_1 
 wire [`PREG_IDX_WIDTH-1:0] rs2_tag1 = (has_dest0 && same_dest_type && (in_rs2_1 == in_rd_0)) ? new_preg0 :
                                       (in_rs2_is_fp_1 ? fp_map[in_rs2_1] : int_map[in_rs2_1]);
 
-wire rs1_tag_valid0 = in_inst_valid[0] && (in_rs1_is_fp_0 ? fp_map_valid[in_rs1_0] : int_map_valid[in_rs1_0]) &&
-                     (!(~in_rs1_is_fp_0 && (in_rs1_0 == {`REG_ADDR_WIDTH{1'b0}})));
-wire rs2_tag_valid0 = in_inst_valid[0] && (in_rs2_is_fp_0 ? fp_map_valid[in_rs2_0] : int_map_valid[in_rs2_0]) &&
-                     (!(~in_rs2_is_fp_0 && (in_rs2_0 == {`REG_ADDR_WIDTH{1'b0}})));
+// Snapshot helpers: map state after inst0, then after inst1.
+always @(*) begin : map_snapshots
+    integer k;
+    for (k = 0; k < ARCH_REGS; k = k + 1) begin
+        int_map_after0[k]    = int_map[k];
+        int_map_v_after0[k]  = int_map_valid[k];
+        fp_map_after0[k]     = fp_map[k];
+        fp_map_v_after0[k]   = fp_map_valid[k];
+    end
+    if (!rename_stall && has_dest0) begin
+        if (in_rd_is_fp_0) begin
+            fp_map_after0[in_rd_0]    = new_preg0;
+            fp_map_v_after0[in_rd_0]  = 1'b1;
+        end else if (in_rd_0 != {`REG_ADDR_WIDTH{1'b0}}) begin
+            int_map_after0[in_rd_0]   = new_preg0;
+            int_map_v_after0[in_rd_0] = 1'b1;
+        end
+    end
+
+    for (k = 0; k < ARCH_REGS; k = k + 1) begin
+        int_map_after1[k]    = int_map_after0[k];
+        int_map_v_after1[k]  = int_map_v_after0[k];
+        fp_map_after1[k]     = fp_map_after0[k];
+        fp_map_v_after1[k]   = fp_map_v_after0[k];
+    end
+    if (!rename_stall && has_dest1) begin
+        if (in_rd_is_fp_1) begin
+            fp_map_after1[in_rd_1]    = new_preg1;
+            fp_map_v_after1[in_rd_1]  = 1'b1;
+        end else if (in_rd_1 != {`REG_ADDR_WIDTH{1'b0}}) begin
+            int_map_after1[in_rd_1]   = new_preg1;
+            int_map_v_after1[in_rd_1] = 1'b1;
+        end
+    end
+end
+
+wire [1:0] int_alloc0 = (!rename_stall && need_int0) ? 2'd1 : 2'd0;
+wire [1:0] int_alloc1 = (!rename_stall && need_int1) ? 2'd1 : 2'd0;
+wire [1:0] fp_alloc0  = (!rename_stall && need_fp0)  ? 2'd1 : 2'd0;
+wire [1:0] fp_alloc1  = (!rename_stall && need_fp1)  ? 2'd1 : 2'd0;
+
+wire [`PREG_IDX_WIDTH:0] int_head_after0 = (int_free_head + int_alloc0 >= INT_PREG_COUNT) ?
+                                           int_free_head + int_alloc0 - INT_PREG_COUNT :
+                                           int_free_head + int_alloc0;
+wire [`PREG_IDX_WIDTH:0] int_head_after1 = (int_free_head + int_alloc0 + int_alloc1 >= INT_PREG_COUNT) ?
+                                           int_free_head + int_alloc0 + int_alloc1 - INT_PREG_COUNT :
+                                           int_free_head + int_alloc0 + int_alloc1;
+wire [`PREG_IDX_WIDTH:0] int_count_after0 = int_free_count - int_alloc0;
+wire [`PREG_IDX_WIDTH:0] int_count_after1 = int_free_count - (int_alloc0 + int_alloc1);
+wire [`PREG_IDX_WIDTH:0] fp_head_after0 = (fp_free_head + fp_alloc0 >= FP_PREG_COUNT) ?
+                                          fp_free_head + fp_alloc0 - FP_PREG_COUNT :
+                                          fp_free_head + fp_alloc0;
+wire [`PREG_IDX_WIDTH:0] fp_head_after1 = (fp_free_head + fp_alloc0 + fp_alloc1 >= FP_PREG_COUNT) ?
+                                          fp_free_head + fp_alloc0 + fp_alloc1 - FP_PREG_COUNT :
+                                          fp_free_head + fp_alloc0 + fp_alloc1;
+wire [`PREG_IDX_WIDTH:0] fp_count_after0 = fp_free_count - fp_alloc0;
+wire [`PREG_IDX_WIDTH:0] fp_count_after1 = fp_free_count - (fp_alloc0 + fp_alloc1);
+wire rs1_is_x0_0 = (!in_rs1_is_fp_0) && (in_rs1_0 == {`REG_ADDR_WIDTH{1'b0}});
+wire rs2_is_x0_0 = (!in_rs2_is_fp_0) && (in_rs2_0 == {`REG_ADDR_WIDTH{1'b0}});
+wire rs1_is_x0_1 = (!in_rs1_is_fp_1) && (in_rs1_1 == {`REG_ADDR_WIDTH{1'b0}});
+wire rs2_is_x0_1 = (!in_rs2_is_fp_1) && (in_rs2_1 == {`REG_ADDR_WIDTH{1'b0}});
+wire rs1_wb_hit0 = (wb0_has_dest && (wb0_new_preg == rs1_tag0) && (wb0_is_float == in_rs1_is_fp_0)) ||
+                   (wb1_has_dest && (wb1_new_preg == rs1_tag0) && (wb1_is_float == in_rs1_is_fp_0)) ||
+                   (wb2_has_dest && (wb2_new_preg == rs1_tag0) && (wb2_is_float == in_rs1_is_fp_0));
+wire rs2_wb_hit0 = (wb0_has_dest && (wb0_new_preg == rs2_tag0) && (wb0_is_float == in_rs2_is_fp_0)) ||
+                   (wb1_has_dest && (wb1_new_preg == rs2_tag0) && (wb1_is_float == in_rs2_is_fp_0)) ||
+                   (wb2_has_dest && (wb2_new_preg == rs2_tag0) && (wb2_is_float == in_rs2_is_fp_0));
+wire rs1_tag_valid0 = in_inst_valid[0] &&
+                     (rs1_is_x0_0 || ((in_rs1_is_fp_0 ? fp_map_valid[in_rs1_0] : int_map_valid[in_rs1_0]) &&
+                                      ((in_rs1_is_fp_0 ? fp_preg_ready[rs1_tag0] : int_preg_ready[rs1_tag0]) || rs1_wb_hit0)));
+wire rs2_tag_valid0 = in_inst_valid[0] &&
+                     (rs2_is_x0_0 || ((in_rs2_is_fp_0 ? fp_map_valid[in_rs2_0] : int_map_valid[in_rs2_0]) &&
+                                      ((in_rs2_is_fp_0 ? fp_preg_ready[rs2_tag0] : int_preg_ready[rs2_tag0]) || rs2_wb_hit0)));
 wire rs1_dep0 = has_dest0 && same_dest_type && (in_rs1_1 == in_rd_0);
 wire rs2_dep0 = has_dest0 && same_dest_type && (in_rs2_1 == in_rd_0);
+wire rs1_wb_hit1 = (wb0_has_dest && (wb0_new_preg == rs1_tag1) && (wb0_is_float == in_rs1_is_fp_1)) ||
+                   (wb1_has_dest && (wb1_new_preg == rs1_tag1) && (wb1_is_float == in_rs1_is_fp_1)) ||
+                   (wb2_has_dest && (wb2_new_preg == rs1_tag1) && (wb2_is_float == in_rs1_is_fp_1));
+wire rs2_wb_hit1 = (wb0_has_dest && (wb0_new_preg == rs2_tag1) && (wb0_is_float == in_rs2_is_fp_1)) ||
+                   (wb1_has_dest && (wb1_new_preg == rs2_tag1) && (wb1_is_float == in_rs2_is_fp_1)) ||
+                   (wb2_has_dest && (wb2_new_preg == rs2_tag1) && (wb2_is_float == in_rs2_is_fp_1));
 wire rs1_tag_valid1 = in_inst_valid[1] && !rs1_dep0 &&
-                     (in_rs1_is_fp_1 ? fp_map_valid[in_rs1_1] : int_map_valid[in_rs1_1]) &&
-                     (!(~in_rs1_is_fp_1 && (in_rs1_1 == {`REG_ADDR_WIDTH{1'b0}})));
+                     (rs1_is_x0_1 || ((in_rs1_is_fp_1 ? fp_map_valid[in_rs1_1] : int_map_valid[in_rs1_1]) &&
+                                      ((in_rs1_is_fp_1 ? fp_preg_ready[rs1_tag1] : int_preg_ready[rs1_tag1]) || rs1_wb_hit1)));
 wire rs2_tag_valid1 = in_inst_valid[1] && !rs2_dep0 &&
-                     (in_rs2_is_fp_1 ? fp_map_valid[in_rs2_1] : int_map_valid[in_rs2_1]) &&
-                     (!(~in_rs2_is_fp_1 && (in_rs2_1 == {`REG_ADDR_WIDTH{1'b0}})));
+                     (rs2_is_x0_1 || ((in_rs2_is_fp_1 ? fp_map_valid[in_rs2_1] : int_map_valid[in_rs2_1]) &&
+                                      ((in_rs2_is_fp_1 ? fp_preg_ready[rs2_tag1] : int_preg_ready[rs2_tag1]) || rs2_wb_hit1)));
 
 wire [`ROB_IDX_WIDTH-1:0] rob_commit0_idx, rob_commit1_idx;
 assign commit0_rob_idx = rob_commit0_idx;
@@ -483,11 +658,22 @@ wire commit1_push_fp  = commit1_valid && commit1_has_dest && commit1_is_float;
 wire [1:0] int_push_count = commit0_push_int + commit1_push_int;
 wire [1:0] fp_push_count  = commit0_push_fp  + commit1_push_fp;
 
+// WB destination tags for scoreboard
+wire wb0_has_dest;
+wire wb0_is_float;
+wire [`PREG_IDX_WIDTH-1:0] wb0_new_preg;
+wire wb1_has_dest;
+wire wb1_is_float;
+wire [`PREG_IDX_WIDTH-1:0] wb1_new_preg;
+wire wb2_has_dest;
+wire wb2_is_float;
+wire [`PREG_IDX_WIDTH-1:0] wb2_new_preg;
+
 // ROB instance
 ROB #(.PREG_IDX_WIDTH(`PREG_IDX_WIDTH)) u_rob (
     .clk(clk),
     .rst_n(rst_n),
-    .alloc0_valid    (rob_req0 && !flush && int_can_alloc && fp_can_alloc),
+    .alloc0_valid    (rob_req0 && !flush && int_can_alloc && fp_can_alloc && rename_fire),
     .alloc0_pc       (in_pc_0),
     .alloc0_has_dest (has_dest0),
     .alloc0_is_float (in_rd_is_fp_0),
@@ -497,7 +683,7 @@ ROB #(.PREG_IDX_WIDTH(`PREG_IDX_WIDTH)) u_rob (
     .alloc0_ready    (alloc0_ready),
     .alloc0_rob_idx  (alloc0_rob_idx),
 
-    .alloc1_valid    (rob_req1 && !flush && int_can_alloc && fp_can_alloc),
+    .alloc1_valid    (rob_req1 && !flush && int_can_alloc && fp_can_alloc && rename_fire),
     .alloc1_pc       (in_pc_1),
     .alloc1_has_dest (has_dest1),
     .alloc1_is_float (in_rd_is_fp_1),
@@ -516,6 +702,19 @@ ROB #(.PREG_IDX_WIDTH(`PREG_IDX_WIDTH)) u_rob (
     .wb1_rob_idx     (wb1_rob_idx),
     .wb1_value       (wb1_value),
     .wb1_exception   (wb1_exception),
+    .wb2_valid       (wb2_valid),
+    .wb2_rob_idx     (wb2_rob_idx),
+    .wb2_value       (wb2_value),
+    .wb2_exception   (wb2_exception),
+    .wb0_has_dest    (wb0_has_dest),
+    .wb0_is_float    (wb0_is_float),
+    .wb0_new_preg    (wb0_new_preg),
+    .wb1_has_dest    (wb1_has_dest),
+    .wb1_is_float    (wb1_is_float),
+    .wb1_new_preg    (wb1_new_preg),
+    .wb2_has_dest    (wb2_has_dest),
+    .wb2_is_float    (wb2_is_float),
+    .wb2_new_preg    (wb2_new_preg),
 
     .commit0_valid   (commit0_valid),
     .commit0_rob_idx (rob_commit0_idx),
@@ -540,10 +739,13 @@ ROB #(.PREG_IDX_WIDTH(`PREG_IDX_WIDTH)) u_rob (
     .commit1_exception(commit1_exception),
 
     .flush           (flush),
-    .rob_empty       (rob_empty)
+    .flush_is_redirect(flush_is_redirect),
+    .flush_rob_idx   (flush_rob_idx),
+    .rob_empty       (rob_empty),
+    .rob_head        (rob_head)
 );
 
-integer i, j;
+integer i, j, k, free_idx;
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
@@ -617,6 +819,12 @@ always @(posedge clk or negedge rst_n) begin
         for (i=ARCH_REGS; i<FP_PREG_COUNT; i=i+1) begin
             fp_free[i-ARCH_REGS] <= i[`PREG_IDX_WIDTH-1:0];
         end
+        for (i=0; i<INT_PREG_COUNT; i=i+1) begin
+            int_preg_ready[i] <= 1'b1;
+        end
+        for (i=0; i<FP_PREG_COUNT; i=i+1) begin
+            fp_preg_ready[i] <= 1'b1;
+        end
         for (j=0; j<`ROB_SIZE; j=j+1) begin
             int_head_cp[j]  <= 0;
             int_tail_cp[j]  <= INT_FREE_INIT_TAIL;
@@ -651,37 +859,129 @@ always @(posedge clk or negedge rst_n) begin
         out_rob_idx_valid_0 <= 1'b0;
         out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
         out_rob_idx_valid_1 <= 1'b0;
-        int_free_head <= 0;
-        int_free_tail <= INT_FREE_INIT_TAIL;
-        int_free_count <= INT_FREE_INIT_TAIL;
-        fp_free_head  <= 0;
-        fp_free_tail  <= FP_FREE_INIT_TAIL;
-        fp_free_count <= FP_FREE_INIT_TAIL;
-        for (i=0; i<ARCH_REGS; i=i+1) begin
-            int_map[i] <= i[`PREG_IDX_WIDTH-1:0];
-            fp_map[i]  <= i[`PREG_IDX_WIDTH-1:0];
-            int_map_valid[i] <= 1'b1;
-            fp_map_valid[i]  <= 1'b1;
-        end
-        for (i=ARCH_REGS; i<INT_PREG_COUNT; i=i+1) begin
-            int_free[i-ARCH_REGS] <= i[`PREG_IDX_WIDTH-1:0];
-        end
-        for (i=ARCH_REGS; i<FP_PREG_COUNT; i=i+1) begin
-            fp_free[i-ARCH_REGS] <= i[`PREG_IDX_WIDTH-1:0];
-        end
-        for (j=0; j<`ROB_SIZE; j=j+1) begin
-            int_head_cp[j]  <= 0;
-            int_tail_cp[j]  <= INT_FREE_INIT_TAIL;
-            int_count_cp[j] <= INT_FREE_INIT_TAIL;
-            fp_head_cp[j]   <= 0;
-            fp_tail_cp[j]   <= FP_FREE_INIT_TAIL;
-            fp_count_cp[j]  <= FP_FREE_INIT_TAIL;
+        if (flush_is_redirect) begin
             for (i=0; i<ARCH_REGS; i=i+1) begin
-                int_map_cp[j][i] <= i[`PREG_IDX_WIDTH-1:0];
-                fp_map_cp[j][i]  <= i[`PREG_IDX_WIDTH-1:0];
-                int_map_v_cp[j][i] <= 1'b1;
-                fp_map_v_cp[j][i]  <= 1'b1;
+                int_map[i] <= int_map_cp[flush_rob_idx][i];
+                fp_map[i]  <= fp_map_cp[flush_rob_idx][i];
+                int_map_valid[i] <= int_map_v_cp[flush_rob_idx][i];
+                fp_map_valid[i]  <= fp_map_v_cp[flush_rob_idx][i];
             end
+            // Rebuild free lists from checkpointed maps for robust recovery.
+            // Also mark old_preg of in-flight ROB entries as used to avoid premature reuse.
+            int_used = {INT_PREG_COUNT{1'b0}};
+            for (k = 0; k < ARCH_REGS; k = k + 1) begin
+                if (int_map_v_cp[flush_rob_idx][k]) begin
+                    int_used[int_map_cp[flush_rob_idx][k]] = 1'b1;
+                end
+            end
+            for (k = 0; k < `ROB_SIZE; k = k + 1) begin
+                if (u_rob.entry_valid[k] && in_range_inclusive(k[`ROB_IDX_WIDTH-1:0], rob_head, flush_rob_idx) &&
+                    u_rob.entry_has_dest[k] && !u_rob.entry_is_float[k] &&
+                    (u_rob.entry_old_preg[k] != {`PREG_IDX_WIDTH{1'b0}})) begin
+                    int_used[u_rob.entry_old_preg[k]] = 1'b1;
+                end
+            end
+            free_idx = 0;
+            for (k = 0; k < INT_PREG_COUNT; k = k + 1) begin
+                if (!int_used[k]) begin
+                    int_free[free_idx[`PREG_IDX_WIDTH-1:0]] <= k[`PREG_IDX_WIDTH-1:0];
+                    free_idx = free_idx + 1;
+                end
+            end
+            int_free_head <= 0;
+            int_free_tail <= free_idx[`PREG_IDX_WIDTH:0];
+            int_free_count <= free_idx[`PREG_IDX_WIDTH:0];
+
+            fp_used = {FP_PREG_COUNT{1'b0}};
+            for (k = 0; k < ARCH_REGS; k = k + 1) begin
+                if (fp_map_v_cp[flush_rob_idx][k]) begin
+                    fp_used[fp_map_cp[flush_rob_idx][k]] = 1'b1;
+                end
+            end
+            for (k = 0; k < `ROB_SIZE; k = k + 1) begin
+                if (u_rob.entry_valid[k] && in_range_inclusive(k[`ROB_IDX_WIDTH-1:0], rob_head, flush_rob_idx) &&
+                    u_rob.entry_has_dest[k] && u_rob.entry_is_float[k] &&
+                    (u_rob.entry_old_preg[k] != {`PREG_IDX_WIDTH{1'b0}})) begin
+                    fp_used[u_rob.entry_old_preg[k]] = 1'b1;
+                end
+            end
+            free_idx = 0;
+            for (k = 0; k < FP_PREG_COUNT; k = k + 1) begin
+                if (!fp_used[k]) begin
+                    fp_free[free_idx[`PREG_IDX_WIDTH-1:0]] <= k[`PREG_IDX_WIDTH-1:0];
+                    free_idx = free_idx + 1;
+                end
+            end
+            fp_free_head  <= 0;
+            fp_free_tail  <= free_idx[`PREG_IDX_WIDTH:0];
+            fp_free_count <= free_idx[`PREG_IDX_WIDTH:0];
+            for (i=0; i<INT_PREG_COUNT; i=i+1) begin
+                int_preg_ready[i] <= 1'b1;
+            end
+            for (i=0; i<FP_PREG_COUNT; i=i+1) begin
+                fp_preg_ready[i] <= 1'b1;
+            end
+            for (k = 0; k < `ROB_SIZE; k = k + 1) begin
+                if (u_rob.entry_valid[k] && in_range_inclusive(k[`ROB_IDX_WIDTH-1:0], rob_head, flush_rob_idx) &&
+                    u_rob.entry_has_dest[k]) begin
+                    if (u_rob.entry_is_float[k]) begin
+                        if (!u_rob.entry_ready[k]) fp_preg_ready[u_rob.entry_new_preg[k]] <= 1'b0;
+                    end else begin
+                        if (!u_rob.entry_ready[k]) int_preg_ready[u_rob.entry_new_preg[k]] <= 1'b0;
+                    end
+                end
+            end
+        end else begin
+            int_free_head <= 0;
+            int_free_tail <= INT_FREE_INIT_TAIL;
+            int_free_count <= INT_FREE_INIT_TAIL;
+            fp_free_head  <= 0;
+            fp_free_tail  <= FP_FREE_INIT_TAIL;
+            fp_free_count <= FP_FREE_INIT_TAIL;
+            for (i=0; i<ARCH_REGS; i=i+1) begin
+                int_map[i] <= i[`PREG_IDX_WIDTH-1:0];
+                fp_map[i]  <= i[`PREG_IDX_WIDTH-1:0];
+                int_map_valid[i] <= 1'b1;
+                fp_map_valid[i]  <= 1'b1;
+            end
+            for (i=ARCH_REGS; i<INT_PREG_COUNT; i=i+1) begin
+                int_free[i-ARCH_REGS] <= i[`PREG_IDX_WIDTH-1:0];
+            end
+            for (i=ARCH_REGS; i<FP_PREG_COUNT; i=i+1) begin
+                fp_free[i-ARCH_REGS] <= i[`PREG_IDX_WIDTH-1:0];
+            end
+            for (i=0; i<INT_PREG_COUNT; i=i+1) begin
+                int_preg_ready[i] <= 1'b1;
+            end
+            for (i=0; i<FP_PREG_COUNT; i=i+1) begin
+                fp_preg_ready[i] <= 1'b1;
+            end
+            for (j=0; j<`ROB_SIZE; j=j+1) begin
+                int_head_cp[j]  <= 0;
+                int_tail_cp[j]  <= INT_FREE_INIT_TAIL;
+                int_count_cp[j] <= INT_FREE_INIT_TAIL;
+                fp_head_cp[j]   <= 0;
+                fp_tail_cp[j]   <= FP_FREE_INIT_TAIL;
+                fp_count_cp[j]  <= FP_FREE_INIT_TAIL;
+                for (i=0; i<ARCH_REGS; i=i+1) begin
+                    int_map_cp[j][i] <= i[`PREG_IDX_WIDTH-1:0];
+                    fp_map_cp[j][i]  <= i[`PREG_IDX_WIDTH-1:0];
+                    int_map_v_cp[j][i] <= 1'b1;
+                    fp_map_v_cp[j][i]  <= 1'b1;
+                end
+            end
+        end
+        if (wb0_valid && wb0_has_dest) begin
+            if (wb0_is_float) fp_preg_ready[wb0_new_preg] <= 1'b1;
+            else              int_preg_ready[wb0_new_preg] <= 1'b1;
+        end
+        if (wb1_valid && wb1_has_dest) begin
+            if (wb1_is_float) fp_preg_ready[wb1_new_preg] <= 1'b1;
+            else              int_preg_ready[wb1_new_preg] <= 1'b1;
+        end
+        if (wb2_valid && wb2_has_dest) begin
+            if (wb2_is_float) fp_preg_ready[wb2_new_preg] <= 1'b1;
+            else              int_preg_ready[wb2_new_preg] <= 1'b1;
         end
     end else begin
         int_free_head_next  = int_free_head;
@@ -689,7 +989,22 @@ always @(posedge clk or negedge rst_n) begin
         int_free_count_next = int_free_count;
         fp_free_count_next  = fp_free_count;
 
-        if (rename_stall) begin
+        // Scoreboard: mark destinations ready on writeback
+        if (wb0_valid && wb0_has_dest) begin
+            if (wb0_is_float) fp_preg_ready[wb0_new_preg] <= 1'b1;
+            else              int_preg_ready[wb0_new_preg] <= 1'b1;
+        end
+        if (wb1_valid && wb1_has_dest) begin
+            if (wb1_is_float) fp_preg_ready[wb1_new_preg] <= 1'b1;
+            else              int_preg_ready[wb1_new_preg] <= 1'b1;
+        end
+        if (wb2_valid && wb2_has_dest) begin
+            if (wb2_is_float) fp_preg_ready[wb2_new_preg] <= 1'b1;
+            else              int_preg_ready[wb2_new_preg] <= 1'b1;
+        end
+
+        if (!stall) begin
+            if (rename_stall) begin
             out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
             out_rob_idx_0 <= {`ROB_IDX_WIDTH{1'b0}};
             out_rob_idx_valid_0 <= 1'b0;
@@ -703,33 +1018,33 @@ always @(posedge clk or negedge rst_n) begin
             out_pred_taken_1 <= 1'b0;
             out_pred_target_1 <= {`INST_ADDR_WIDTH{1'b0}};
             out_pred_hist_1 <= {`BP_GHR_BITS{1'b0}};
-        end else begin
-            if (rob_req0) begin
-                int_head_cp[alloc0_rob_idx]  <= int_free_head;
+            end else begin
+            if (rob_req0 && !rename_stall) begin
+                int_head_cp[alloc0_rob_idx]  <= int_head_after0;
                 int_tail_cp[alloc0_rob_idx]  <= int_free_tail;
-                int_count_cp[alloc0_rob_idx] <= int_free_count;
-                fp_head_cp[alloc0_rob_idx]   <= fp_free_head;
+                int_count_cp[alloc0_rob_idx] <= int_count_after0;
+                fp_head_cp[alloc0_rob_idx]   <= fp_head_after0;
                 fp_tail_cp[alloc0_rob_idx]   <= fp_free_tail;
-                fp_count_cp[alloc0_rob_idx]  <= fp_free_count;
+                fp_count_cp[alloc0_rob_idx]  <= fp_count_after0;
                 for (i=0; i<ARCH_REGS; i=i+1) begin
-                    int_map_cp[alloc0_rob_idx][i] <= int_map[i];
-                    fp_map_cp[alloc0_rob_idx][i]  <= fp_map[i];
-                    int_map_v_cp[alloc0_rob_idx][i] <= int_map_valid[i];
-                    fp_map_v_cp[alloc0_rob_idx][i]  <= fp_map_valid[i];
+                    int_map_cp[alloc0_rob_idx][i] <= int_map_after0[i];
+                    fp_map_cp[alloc0_rob_idx][i]  <= fp_map_after0[i];
+                    int_map_v_cp[alloc0_rob_idx][i] <= int_map_v_after0[i];
+                    fp_map_v_cp[alloc0_rob_idx][i]  <= fp_map_v_after0[i];
                 end
             end
-            if (rob_req1) begin
-                int_head_cp[alloc1_rob_idx]  <= int_free_head;
+            if (rob_req1 && !rename_stall) begin
+                int_head_cp[alloc1_rob_idx]  <= int_head_after1;
                 int_tail_cp[alloc1_rob_idx]  <= int_free_tail;
-                int_count_cp[alloc1_rob_idx] <= int_free_count;
-                fp_head_cp[alloc1_rob_idx]   <= fp_free_head;
+                int_count_cp[alloc1_rob_idx] <= int_count_after1;
+                fp_head_cp[alloc1_rob_idx]   <= fp_head_after1;
                 fp_tail_cp[alloc1_rob_idx]   <= fp_free_tail;
-                fp_count_cp[alloc1_rob_idx]  <= fp_free_count;
+                fp_count_cp[alloc1_rob_idx]  <= fp_count_after1;
                 for (i=0; i<ARCH_REGS; i=i+1) begin
-                    int_map_cp[alloc1_rob_idx][i] <= int_map[i];
-                    fp_map_cp[alloc1_rob_idx][i]  <= fp_map[i];
-                    int_map_v_cp[alloc1_rob_idx][i] <= int_map_valid[i];
-                    fp_map_v_cp[alloc1_rob_idx][i]  <= fp_map_valid[i];
+                    int_map_cp[alloc1_rob_idx][i] <= int_map_after1[i];
+                    fp_map_cp[alloc1_rob_idx][i]  <= fp_map_after1[i];
+                    int_map_v_cp[alloc1_rob_idx][i] <= int_map_v_after1[i];
+                    fp_map_v_cp[alloc1_rob_idx][i]  <= fp_map_v_after1[i];
                 end
             end
             out_inst_valid <= in_inst_valid;
@@ -836,10 +1151,11 @@ always @(posedge clk or negedge rst_n) begin
                 out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
                 out_rob_idx_valid_1 <= 1'b0;
             end
+            end
         end
 
         // Pop free lists on allocation
-        if (!rename_stall) begin
+        if (!rename_stall && !stall) begin
             if (int_need_count != 0) begin
                 int_free_head_next = (int_free_head + int_need_count >= INT_PREG_COUNT) ?
                                       int_free_head + int_need_count - INT_PREG_COUNT :
@@ -855,22 +1171,26 @@ always @(posedge clk or negedge rst_n) begin
         end
 
         // Update maps on allocation
-        if (!rename_stall && has_dest0) begin
+        if (!rename_stall && !stall && has_dest0) begin
             if (in_rd_is_fp_0) begin
                 fp_map[in_rd_0] <= new_preg0;
                 fp_map_valid[in_rd_0] <= 1'b1;
+                fp_preg_ready[new_preg0] <= 1'b0;
             end else if (in_rd_0 != {`REG_ADDR_WIDTH{1'b0}}) begin
                 int_map[in_rd_0] <= new_preg0;
                 int_map_valid[in_rd_0] <= 1'b1;
+                int_preg_ready[new_preg0] <= 1'b0;
             end
         end
-        if (!rename_stall && has_dest1) begin
+        if (!rename_stall && !stall && has_dest1) begin
             if (in_rd_is_fp_1) begin
                 fp_map[in_rd_1] <= new_preg1;
                 fp_map_valid[in_rd_1] <= 1'b1;
+                fp_preg_ready[new_preg1] <= 1'b0;
             end else if (in_rd_1 != {`REG_ADDR_WIDTH{1'b0}}) begin
                 int_map[in_rd_1] <= new_preg1;
                 int_map_valid[in_rd_1] <= 1'b1;
+                int_preg_ready[new_preg1] <= 1'b0;
             end
         end
 

@@ -6,6 +6,7 @@
 module PostDecode (
     input clk,
     input rst_n,
+    input stall,
 
     // Incoming bundle from rename
     input  wire [`IF_BATCH_SIZE-1:0]   in_inst_valid,
@@ -539,7 +540,7 @@ always @(posedge clk or negedge rst_n) begin
         out_fp_op_1 <= `FP_OP_DUMMY;
         out_illegal_0 <= 1'b0;
         out_illegal_1 <= 1'b0;
-    end else begin
+    end else if (!stall) begin
         out_inst_valid <= in_inst_valid;
 
         if (in_inst_valid[0]) begin
