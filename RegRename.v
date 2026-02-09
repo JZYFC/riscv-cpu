@@ -149,7 +149,11 @@ module ROB #(
 
     wire [ROB_IDX_WIDTH:0] free_slots = ROB_SIZE - count;
     wire alloc0_can = (free_slots >= 1);
-    wire alloc1_can = (free_slots >= (alloc0_valid ? 2 : 1));
+    // Keep alloc1 readiness independent of alloc0_valid to avoid a
+    // combinational loop through rename_stall/rename_fire.
+    // In this pipeline, slot1 is only used together with slot0, so requiring
+    // two free slots preserves the all-or-nothing dual-alloc contract.
+    wire alloc1_can = (free_slots >= 2);
     wire do_alloc0  = alloc0_valid && alloc0_can;
     wire do_alloc1  = alloc1_valid && alloc1_can;
     assign alloc0_ready   = alloc0_can;
@@ -426,7 +430,21 @@ module RegRename #(
     output wire                        rob_empty,
     output wire [`ROB_IDX_WIDTH-1:0]   rob_head,
 
-    output wire                        rename_stall
+    output wire                        rename_stall,
+
+    // Live physical-register readiness queries (for dispatch/issue enqueue timing)
+    input  wire                        sb_q0_is_fp,
+    input  wire [`PREG_IDX_WIDTH-1:0]  sb_q0_tag,
+    output wire                        sb_q0_ready,
+    input  wire                        sb_q1_is_fp,
+    input  wire [`PREG_IDX_WIDTH-1:0]  sb_q1_tag,
+    output wire                        sb_q1_ready,
+    input  wire                        sb_q2_is_fp,
+    input  wire [`PREG_IDX_WIDTH-1:0]  sb_q2_tag,
+    output wire                        sb_q2_ready,
+    input  wire                        sb_q3_is_fp,
+    input  wire [`PREG_IDX_WIDTH-1:0]  sb_q3_tag,
+    output wire                        sb_q3_ready
 );
 
 localparam INT_PREG_COUNT = `INT_PREG_NUM;
@@ -441,6 +459,11 @@ reg [`PREG_IDX_WIDTH-1:0] fp_map  [0:ARCH_REGS-1];
 reg                       fp_map_valid  [0:ARCH_REGS-1];
 reg                       int_preg_ready [0:INT_PREG_COUNT-1];
 reg                       fp_preg_ready  [0:FP_PREG_COUNT-1];
+
+assign sb_q0_ready = sb_q0_is_fp ? fp_preg_ready[sb_q0_tag] : int_preg_ready[sb_q0_tag];
+assign sb_q1_ready = sb_q1_is_fp ? fp_preg_ready[sb_q1_tag] : int_preg_ready[sb_q1_tag];
+assign sb_q2_ready = sb_q2_is_fp ? fp_preg_ready[sb_q2_tag] : int_preg_ready[sb_q2_tag];
+assign sb_q3_ready = sb_q3_is_fp ? fp_preg_ready[sb_q3_tag] : int_preg_ready[sb_q3_tag];
 
 // Checkpoints per ROB entry (snapshot after allocation)
 reg [`PREG_IDX_WIDTH-1:0] int_map_cp    [0:`ROB_SIZE-1][0:ARCH_REGS-1];

@@ -35,8 +35,10 @@ module IssueBuffer #(
     input  wire                         in_rob_idx_valid_0,
     input  wire [`PREG_IDX_WIDTH-1:0]   in_rs1_preg_0,
     input  wire                         in_rs1_preg_valid_0,
+    input  wire                         in_rs1_ready_now_0,
     input  wire [`PREG_IDX_WIDTH-1:0]   in_rs2_preg_0,
     input  wire                         in_rs2_preg_valid_0,
+    input  wire                         in_rs2_ready_now_0,
     input  wire [`PREG_IDX_WIDTH-1:0]   in_rd_preg_0,
     input  wire                         in_rd_preg_valid_0,
     input  wire [`FU_DEC_WIDTH-1:0]     in_fu_sel_0,
@@ -70,8 +72,10 @@ module IssueBuffer #(
     input  wire                         in_rob_idx_valid_1,
     input  wire [`PREG_IDX_WIDTH-1:0]   in_rs1_preg_1,
     input  wire                         in_rs1_preg_valid_1,
+    input  wire                         in_rs1_ready_now_1,
     input  wire [`PREG_IDX_WIDTH-1:0]   in_rs2_preg_1,
     input  wire                         in_rs2_preg_valid_1,
+    input  wire                         in_rs2_ready_now_1,
     input  wire [`PREG_IDX_WIDTH-1:0]   in_rd_preg_1,
     input  wire                         in_rd_preg_valid_1,
     input  wire [`FU_DEC_WIDTH-1:0]     in_fu_sel_1,
@@ -254,6 +258,10 @@ module IssueBuffer #(
     wire rs2_is_x0_0 = (!in_rs2_is_fp_0) && (in_rs2_0 == {`REG_ADDR_WIDTH{1'b0}});
     wire rs1_is_x0_1 = (!in_rs1_is_fp_1) && (in_rs1_1 == {`REG_ADDR_WIDTH{1'b0}});
     wire rs2_is_x0_1 = (!in_rs2_is_fp_1) && (in_rs2_1 == {`REG_ADDR_WIDTH{1'b0}});
+    wire rs1_ready_now_0 = rs1_is_x0_0 || in_rs1_ready_now_0 || rs1_cdb0_hit_0 || rs1_cdb1_hit_0;
+    wire rs2_ready_now_0 = rs2_is_x0_0 || in_rs2_ready_now_0 || rs2_cdb0_hit_0 || rs2_cdb1_hit_0;
+    wire rs1_ready_now_1 = rs1_is_x0_1 || in_rs1_ready_now_1 || rs1_cdb0_hit_1 || rs1_cdb1_hit_1;
+    wire rs2_ready_now_1 = rs2_is_x0_1 || in_rs2_ready_now_1 || rs2_cdb0_hit_1 || rs2_cdb1_hit_1;
 
     // Branch resolve signals (combinational for current issue selection)
     reg br0_taken, br1_taken;
@@ -981,19 +989,19 @@ module IssueBuffer #(
                     rs_pred_hist[found_idx0]  <= in_pred_hist_0;
                     rs_arch_rd[found_idx0]    <= in_rd_0;
                     rs_arch_rs1[found_idx0]   <= in_rs1_0;
-                    rs_rs1_ready[found_idx0]  <= in_rs1_preg_valid_0 || rs1_cdb0_hit_0 || rs1_cdb1_hit_0 || rs1_is_x0_0;
-                    rs_rs2_ready[found_idx0]  <= in_rs2_preg_valid_0 || rs2_cdb0_hit_0 || rs2_cdb1_hit_0 || rs2_is_x0_0;
+                    rs_rs1_ready[found_idx0]  <= rs1_ready_now_0;
+                    rs_rs2_ready[found_idx0]  <= rs2_ready_now_0;
                     rs_rs1_tag[found_idx0]    <= in_rs1_preg_0;
                     rs_rs2_tag[found_idx0]    <= in_rs2_preg_0;
                     rs_rs1_val[found_idx0]    <= rs1_is_x0_0 ? {`DATA_WIDTH{1'b0}} :
-                                                in_rs1_preg_valid_0 ? (in_rs1_is_fp_0 ? fp_rs1_data0 : int_rs1_data0) :
                                                 rs1_cdb1_hit_0 ? cdb1_value :
                                                 rs1_cdb0_hit_0 ? cdb0_value :
+                                                in_rs1_ready_now_0 ? (in_rs1_is_fp_0 ? fp_rs1_data0 : int_rs1_data0) :
                                                 {`DATA_WIDTH{1'b0}};
                     rs_rs2_val[found_idx0]    <= rs2_is_x0_0 ? {`DATA_WIDTH{1'b0}} :
-                                                in_rs2_preg_valid_0 ? (in_rs2_is_fp_0 ? fp_rs2_data0 : int_rs2_data0) :
                                                 rs2_cdb1_hit_0 ? cdb1_value :
                                                 rs2_cdb0_hit_0 ? cdb0_value :
+                                                in_rs2_ready_now_0 ? (in_rs2_is_fp_0 ? fp_rs2_data0 : int_rs2_data0) :
                                                 {`DATA_WIDTH{1'b0}};
                     rs_rd_tag[found_idx0]     <= in_rd_preg_0;
                     rs_rd_is_fp[found_idx0]   <= in_rd_is_fp_0;
@@ -1031,19 +1039,19 @@ module IssueBuffer #(
                     rs_pred_hist[found_idx1]  <= in_pred_hist_1;
                     rs_arch_rd[found_idx1]    <= in_rd_1;
                     rs_arch_rs1[found_idx1]   <= in_rs1_1;
-                    rs_rs1_ready[found_idx1]  <= in_rs1_preg_valid_1 || rs1_cdb0_hit_1 || rs1_cdb1_hit_1 || rs1_is_x0_1;
-                    rs_rs2_ready[found_idx1]  <= in_rs2_preg_valid_1 || rs2_cdb0_hit_1 || rs2_cdb1_hit_1 || rs2_is_x0_1;
+                    rs_rs1_ready[found_idx1]  <= rs1_ready_now_1;
+                    rs_rs2_ready[found_idx1]  <= rs2_ready_now_1;
                     rs_rs1_tag[found_idx1]    <= in_rs1_preg_1;
                     rs_rs2_tag[found_idx1]    <= in_rs2_preg_1;
                     rs_rs1_val[found_idx1]    <= rs1_is_x0_1 ? {`DATA_WIDTH{1'b0}} :
-                                                in_rs1_preg_valid_1 ? (in_rs1_is_fp_1 ? fp_rs1_data1 : int_rs1_data1) :
                                                 rs1_cdb1_hit_1 ? cdb1_value :
                                                 rs1_cdb0_hit_1 ? cdb0_value :
+                                                in_rs1_ready_now_1 ? (in_rs1_is_fp_1 ? fp_rs1_data1 : int_rs1_data1) :
                                                 {`DATA_WIDTH{1'b0}};
                     rs_rs2_val[found_idx1]    <= rs2_is_x0_1 ? {`DATA_WIDTH{1'b0}} :
-                                                in_rs2_preg_valid_1 ? (in_rs2_is_fp_1 ? fp_rs2_data1 : int_rs2_data1) :
                                                 rs2_cdb1_hit_1 ? cdb1_value :
                                                 rs2_cdb0_hit_1 ? cdb0_value :
+                                                in_rs2_ready_now_1 ? (in_rs2_is_fp_1 ? fp_rs2_data1 : int_rs2_data1) :
                                                 {`DATA_WIDTH{1'b0}};
                     rs_rd_tag[found_idx1]     <= in_rd_preg_1;
                     rs_rd_is_fp[found_idx1]   <= in_rd_is_fp_1;
