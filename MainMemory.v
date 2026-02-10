@@ -10,7 +10,10 @@ module MainMemory (
     input wire [127:0] mem_wdata,
 
     output reg [127:0] mem_rdata,
-    output reg         mem_ready
+    output reg         mem_ready,
+    // Address of the completed transaction (line-aligned by requesters).
+    // Used by caches to verify refill responses match the outstanding miss.
+    output reg [31:0]  mem_resp_addr
 );
 
     reg [127:0] ram [0:255];
@@ -26,6 +29,7 @@ module MainMemory (
             mem_ready <= 0;
             delay_cnt <= 0;
             mem_rdata <= 0;
+            mem_resp_addr <= 32'b0;
             txn_active <= 1'b0;
             txn_we <= 1'b0;
             txn_addr <= 32'b0;
@@ -40,6 +44,7 @@ module MainMemory (
                     mem_ready <= 1;
                     delay_cnt <= 0;
                     txn_active <= 1'b0;
+                    mem_resp_addr <= txn_addr;
 
                     if (txn_we) begin
                         ram[txn_addr[11:4]] <= txn_wdata;

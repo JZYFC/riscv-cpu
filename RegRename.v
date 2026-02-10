@@ -677,6 +677,18 @@ wire [`PREG_IDX_WIDTH:0] fp_head_after1 = (fp_free_head + fp_alloc0 + fp_alloc1 
                                           fp_free_head + fp_alloc0 + fp_alloc1;
 wire [`PREG_IDX_WIDTH:0] fp_count_after0 = fp_free_count - fp_alloc0;
 wire [`PREG_IDX_WIDTH:0] fp_count_after1 = fp_free_count - (fp_alloc0 + fp_alloc1);
+
+// WB destination tags for scoreboard
+wire wb0_has_dest;
+wire wb0_is_float;
+wire [`PREG_IDX_WIDTH-1:0] wb0_new_preg;
+wire wb1_has_dest;
+wire wb1_is_float;
+wire [`PREG_IDX_WIDTH-1:0] wb1_new_preg;
+wire wb2_has_dest;
+wire wb2_is_float;
+wire [`PREG_IDX_WIDTH-1:0] wb2_new_preg;
+
 wire rs1_is_x0_0 = (!in_rs1_is_fp_0) && (in_rs1_0 == {`REG_ADDR_WIDTH{1'b0}});
 wire rs2_is_x0_0 = (!in_rs2_is_fp_0) && (in_rs2_0 == {`REG_ADDR_WIDTH{1'b0}});
 wire rs1_is_x0_1 = (!in_rs1_is_fp_1) && (in_rs1_1 == {`REG_ADDR_WIDTH{1'b0}});
@@ -719,17 +731,6 @@ wire commit0_push_fp  = commit0_valid && commit0_has_dest && commit0_is_float;
 wire commit1_push_fp  = commit1_valid && commit1_has_dest && commit1_is_float;
 wire [1:0] int_push_count = commit0_push_int + commit1_push_int;
 wire [1:0] fp_push_count  = commit0_push_fp  + commit1_push_fp;
-
-// WB destination tags for scoreboard
-wire wb0_has_dest;
-wire wb0_is_float;
-wire [`PREG_IDX_WIDTH-1:0] wb0_new_preg;
-wire wb1_has_dest;
-wire wb1_is_float;
-wire [`PREG_IDX_WIDTH-1:0] wb1_new_preg;
-wire wb2_has_dest;
-wire wb2_is_float;
-wire [`PREG_IDX_WIDTH-1:0] wb2_new_preg;
 
 // ROB instance
 ROB #(.PREG_IDX_WIDTH(`PREG_IDX_WIDTH)) u_rob (

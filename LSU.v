@@ -5,7 +5,7 @@ module LSU (
     input wire rst_n,
     input wire flush,
 
-    // À´×Ô IssueBuffer µÄÇëÇó
+    // æ¥è‡ª IssueBuffer çš„è¯·æ±‚
     input wire valid_in,
     input wire [31:0] addr,
     input wire [31:0] wdata,
@@ -17,32 +17,33 @@ module LSU (
     input wire [`PREG_IDX_WIDTH-1:0] rd_tag_in,
     input wire rd_is_fp_in,
 
-    // ·´À¡¸ø IssueBuffer µÄ×´Ì¬
-    output wire busy,             // µ¥ÔªÃ¦£¬ÎŞ·¨½ÓÊÕĞÂÇëÇó
-    output reg  wb_valid,         // Ğ´»ØÓĞĞ§
-    output reg  [31:0] wb_value,  // Ğ´»ØÊı¾İ
+    // åé¦ˆç»™ IssueBuffer çš„çŠ¶æ€
+    output wire busy,             // å•å…ƒå¿™ï¼Œæ— æ³•æ¥æ”¶æ–°è¯·æ±‚
+    output reg  wb_valid,         // å†™å›æœ‰æ•ˆ
+    output reg  [31:0] wb_value,  // å†™å›æ•°æ®
     output reg  [`ROB_IDX_WIDTH-1:0] wb_rob_idx,
     output reg  [`ROB_GEN_WIDTH-1:0] wb_rob_gen,
     output reg  [`PREG_IDX_WIDTH-1:0] wb_dest_tag,
     output reg  wb_dest_is_fp,
-    output reg  wb_exception,     // ·¢ÉúÒì³££¨Èç·Ç·¨·ÃÎÊ£©
+    output reg  wb_exception,     // å‘ç”Ÿå¼‚å¸¸ï¼ˆå¦‚éæ³•è®¿é—®ï¼‰
 
-    // Á¬½Óµ½ MainMemory µÄ½Ó¿Ú (´©Í¸ Cache)
+    // è¿æ¥åˆ° MainMemory çš„æ¥å£ (ç©¿é€ Cache)
     output wire mem_req,
     output wire mem_we,
     output wire [31:0] mem_addr,
     output wire [127:0] mem_wdata,
     input  wire [127:0] mem_rdata,
-    input  wire mem_ready
+    input  wire mem_ready,
+    input  wire [31:0] mem_resp_addr
 );
 
-    // ×´Ì¬»ú¶¨Òå
+    // çŠ¶æ€æœºå®šä¹‰
     localparam IDLE = 2'd0;
     localparam WAIT_CACHE = 2'd1;
     localparam DONE = 2'd2;
     reg [1:0] state;
 
-    // Ëø´æÊäÈëĞÅºÅ
+    // é”å­˜è¾“å…¥ä¿¡å·
     reg [31:0] addr_reg;
     reg [31:0] wdata_reg;
     reg [`MEM_OP_WIDTH-1:0] mem_op_reg;
@@ -55,7 +56,7 @@ module LSU (
 
     assign busy = (state != IDLE);
 
-    // === TLB ÊµÀı ===
+    // === TLB å®ä¾‹ ===
     wire [31:0] tlb_paddr;
     wire tlb_hit, tlb_miss;
     TLB u_tlb (
@@ -65,15 +66,15 @@ module LSU (
         .we(1'b0), .w_vaddr(32'b0), .w_paddr(32'b0)
     );
 
-    // Èç¹û TLB Ã»ÃüÖĞ£¬Ä¬ÈÏÎïÀíµØÖ· = ĞéÄâµØÖ· (Bare-metal Ä£Ê½)
+    // å¦‚æœ TLB æ²¡å‘½ä¸­ï¼Œé»˜è®¤ç‰©ç†åœ°å€ = è™šæ‹Ÿåœ°å€ (Bare-metal æ¨¡å¼)
     wire [31:0] effective_paddr = tlb_hit ? tlb_paddr : addr_reg;
 
-    // === Cache ÊµÀı ===
+    // === Cache å®ä¾‹ ===
     wire [31:0] cache_rdata;
     wire cache_valid_out;
     wire cache_stall;
     
-    // Éú³É Cache Ğ´Ñ¡Í¨ (wstrb)
+    // ç”Ÿæˆ Cache å†™é€‰é€š (wstrb)
     reg [3:0] wstrb;
     always @(*) begin
         case (mem_op_reg)
@@ -84,7 +85,7 @@ module LSU (
         endcase
     end
 
-    // ¶ÔÆëĞ´Êı¾İ
+    // å¯¹é½å†™æ•°æ®
     reg [31:0] aligned_wdata;
     always @(*) begin
         case (mem_op_reg)
@@ -106,7 +107,7 @@ module LSU (
 
     Cache u_cache (
         .clk(clk), .rst_n(rst_n),
-        // CPU ²à
+        // CPU ä¾§
         .paddr(effective_paddr),
         .req(state == WAIT_CACHE),
         .we(!mem_is_load_reg && (state == WAIT_CACHE)),
@@ -115,19 +116,20 @@ module LSU (
         .rdata(cache_rdata),
         .valid_out(cache_valid_out),
         .stall_cpu(cache_stall),
-        // Ö÷´æ²à
+        // ä¸»å­˜ä¾§
         .mem_req(mem_req), .mem_we(mem_we),
         .mem_addr(mem_addr), .mem_wdata(mem_wdata),
-        .mem_rdata(mem_rdata), .mem_ready(mem_ready)
+        .mem_rdata(mem_rdata), .mem_ready(mem_ready),
+        .mem_resp_addr(mem_resp_addr)
     );
 
-    // === Load Êı¾İÀ©Õ¹Âß¼­ ===
+    // === Load æ•°æ®æ‰©å±•é€»è¾‘ ===
     reg [31:0] final_rdata;
     reg [7:0]  b_data;
     reg [15:0] h_data;
     
     always @(*) begin
-        // ¸ù¾İµØÖ·µÍÎ»Ñ¡Ôñ×Ö½Ú/°ë×Ö
+        // æ ¹æ®åœ°å€ä½ä½é€‰æ‹©å­—èŠ‚/åŠå­—
         case (addr_reg[1:0])
             2'b00: b_data = cache_rdata[7:0];
             2'b01: b_data = cache_rdata[15:8];
@@ -149,7 +151,7 @@ module LSU (
         endcase
     end
 
-    // === Ö÷¿Ø×´Ì¬»ú ===
+    // === ä¸»æ§çŠ¶æ€æœº ===
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
@@ -191,17 +193,17 @@ module LSU (
                         end
                     end
                     WAIT_CACHE: begin
-                        // Cache ÃüÖĞÇÒ·µ»ØÓĞĞ§Êı¾İ 
+                        // Cache å‘½ä¸­ä¸”è¿”å›æœ‰æ•ˆæ•°æ® 
                         if (cache_valid_out) begin
                             wb_valid <= 1;
-                            // Èç¹ûÊÇ Load£¬Ğ´»Ø¶ÁÈ¡µÄÊı¾İ£»Èç¹ûÊÇ Store£¬Ğ´»Ø 0 
+                            // å¦‚æœæ˜¯ Loadï¼Œå†™å›è¯»å–çš„æ•°æ®ï¼›å¦‚æœæ˜¯ Storeï¼Œå†™å› 0 
                             wb_value <= mem_is_load_reg ? final_rdata : 32'b0;
                             wb_rob_idx <= rob_idx_reg;
                             wb_rob_gen <= rob_gen_reg;
                             wb_dest_tag <= rd_tag_reg;
                             wb_dest_is_fp <= rd_is_fp_reg;
                             wb_exception <= 0;
-                            state <= IDLE; // ÈÎÎñÍê³É£¬»Øµ½ IDLE
+                            state <= IDLE; // ä»»åŠ¡å®Œæˆï¼Œå›åˆ° IDLE
                         end
                     end
                 endcase

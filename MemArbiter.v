@@ -26,7 +26,10 @@ module MemArbiter (
     output reg [31:0]  mem_addr,
     output reg [127:0] mem_wdata,
     input  wire [127:0] mem_rdata,
-    input  wire        mem_ready
+    input  wire        mem_ready,
+    input  wire [31:0] mem_resp_addr,
+    output reg [31:0]  i_resp_addr,
+    output reg [31:0]  d_resp_addr
 );
 
     // State machine: prioritize D-Cache over I-Cache
@@ -72,6 +75,8 @@ module MemArbiter (
         mem_req = 0; mem_we = 0; mem_addr = 0; mem_wdata = 0;
         d_ready = 0; d_rdata = 0;
         i_ready = 0; i_rdata = 0;
+        i_resp_addr = 32'b0;
+        d_resp_addr = 32'b0;
 
         case (state)
             IDLE: begin
@@ -98,6 +103,7 @@ module MemArbiter (
                 mem_wdata = 0;
                 d_ready = mem_ready;
                 d_rdata = mem_rdata;
+                d_resp_addr = mem_resp_addr;
             end
             SERVE_I: begin
                 mem_req = 0;
@@ -106,6 +112,7 @@ module MemArbiter (
                 mem_wdata = 0;
                 i_ready = mem_ready;
                 i_rdata = mem_rdata;
+                i_resp_addr = mem_resp_addr;
             end
         endcase
     end

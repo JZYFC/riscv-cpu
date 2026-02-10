@@ -128,6 +128,7 @@ wire [31:0]  ic_mem_addr;
 wire [127:0] ic_mem_wdata;
 wire [127:0] ic_mem_rdata;
 wire         ic_mem_ready;
+wire [31:0]  ic_mem_resp_addr;
 
 wire         d_mem_req;
 wire         d_mem_we;
@@ -135,6 +136,7 @@ wire [31:0]  d_mem_addr;
 wire [127:0] d_mem_wdata;
 wire [127:0] d_mem_rdata;
 wire         d_mem_ready;
+wire [31:0]  d_mem_resp_addr;
 
 wire         mem_req;
 wire         mem_we;
@@ -142,6 +144,7 @@ wire [31:0]  mem_addr;
 wire [127:0] mem_wdata;
 wire [127:0] mem_rdata;
 wire         mem_ready;
+wire [31:0]  mem_resp_addr;
 
 ICache u_icache (
     .clk(clk),
@@ -156,7 +159,8 @@ ICache u_icache (
     .mem_addr(ic_mem_addr),
     .mem_wdata(ic_mem_wdata),
     .mem_rdata(ic_mem_rdata),
-    .mem_ready(ic_mem_ready)
+    .mem_ready(ic_mem_ready),
+    .mem_resp_addr(ic_mem_resp_addr)
 );
 
 MemArbiter u_memarb (
@@ -168,18 +172,21 @@ MemArbiter u_memarb (
     .i_wdata(ic_mem_wdata),
     .i_rdata(ic_mem_rdata),
     .i_ready(ic_mem_ready),
+    .i_resp_addr(ic_mem_resp_addr),
     .d_req(d_mem_req),
     .d_we(d_mem_we),
     .d_addr(d_mem_addr),
     .d_wdata(d_mem_wdata),
     .d_rdata(d_mem_rdata),
     .d_ready(d_mem_ready),
+    .d_resp_addr(d_mem_resp_addr),
     .mem_req(mem_req),
     .mem_we(mem_we),
     .mem_addr(mem_addr),
     .mem_wdata(mem_wdata),
     .mem_rdata(mem_rdata),
-    .mem_ready(mem_ready)
+    .mem_ready(mem_ready),
+    .mem_resp_addr(mem_resp_addr)
 );
 
 MainMemory u_mainmem (
@@ -190,7 +197,8 @@ MainMemory u_mainmem (
     .mem_addr(mem_addr),
     .mem_wdata(mem_wdata),
     .mem_rdata(mem_rdata),
-    .mem_ready(mem_ready)
+    .mem_ready(mem_ready),
+    .mem_resp_addr(mem_resp_addr)
 );
 
 // ----------------------------
@@ -1275,7 +1283,8 @@ LSU u_lsu (
     .mem_addr(d_mem_addr),
     .mem_wdata(d_mem_wdata),
     .mem_rdata(d_mem_rdata),
-    .mem_ready(d_mem_ready)
+    .mem_ready(d_mem_ready),
+    .mem_resp_addr(d_mem_resp_addr)
 );
 
 endmodule

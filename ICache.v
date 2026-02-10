@@ -17,7 +17,8 @@ module ICache (
     output reg [31:0]  mem_addr,
     output reg [127:0] mem_wdata,
     input  wire [127:0] mem_rdata,
-    input  wire        mem_ready
+    input  wire        mem_ready,
+    input  wire [31:0] mem_resp_addr
 );
     localparam SETS = 1 << `CACHE_INDEX_BITS;
     localparam TAG_BITS = `CACHE_TAG_BITS;
@@ -110,15 +111,24 @@ module ICache (
                     mem_we <= 1'b0;
                     mem_addr <= miss_line_addr;
                     if (mem_ready) begin
-                        state <= IDLE;
-                        if (!miss_victim_way) begin
-                            data_way0[miss_index] <= mem_rdata;
-                            tag_way0[miss_index] <= {1'b0, 1'b1, miss_tag};
+                        // Only install the line if the returned response address matches
+                        // the outstanding miss. This prevents silent line skew when memory
+                        // responses get mis-associated.
+                        if (mem_resp_addr == miss_line_addr) begin
+                            state <= IDLE;
+                            if (!miss_victim_way) begin
+                                data_way0[miss_index] <= mem_rdata;
+                                tag_way0[miss_index] <= {1'b0, 1'b1, miss_tag};
+                            end else begin
+                                data_way1[miss_index] <= mem_rdata;
+                                tag_way1[miss_index] <= {1'b0, 1'b1, miss_tag};
+                            end
+                            lru[miss_index] <= ~miss_victim_way;
                         end else begin
-                            data_way1[miss_index] <= mem_rdata;
-                            tag_way1[miss_index] <= {1'b0, 1'b1, miss_tag};
+                            // Keep waiting/retry; arbiter/mainmem should eventually return
+                            // the correct line for miss_line_addr.
+                            state <= REFILL;
                         end
-                        lru[miss_index] <= ~miss_victim_way;
                     end
                 end
             endcase

@@ -20,7 +20,8 @@ module Cache (
     output reg [31:0]  mem_addr,
     output reg [127:0] mem_wdata,
     input  wire [127:0] mem_rdata,
-    input  wire        mem_ready
+    input  wire        mem_ready,
+    input  wire [31:0] mem_resp_addr
 );
 
     // Parameters
@@ -292,7 +293,15 @@ module Cache (
 
                 REFILL: begin
                     if (mem_ready) begin
-                        // Fix Bug 2: Merge pending store data if this is a write miss
+                        // Only install refill data if the response address matches the miss.
+                        // Prevents silent corruption if memory responses are mis-associated.
+                        if (mem_resp_addr != {miss_addr[31:4], 4'b0000}) begin
+                            // Keep waiting/retry for the correct line.
+                            mem_req <= 1;
+                            mem_we <= 0;
+                            mem_addr <= {miss_addr[31:4], 4'b0000};
+                        end else begin
+                        // Merge pending store data if this is a write miss
                         temp_data = mem_rdata;
                         if (miss_we) begin
                             case(miss_offset[3:2])
@@ -347,6 +356,7 @@ module Cache (
                             state <= WRITE_THROUGH;
                         end else begin
                             state <= IDLE;
+                        end
                         end
                     end else begin
                         mem_req <= 1;

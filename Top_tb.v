@@ -849,6 +849,8 @@ module Top_tb;
         integer r;
         integer robd;
         reg pass;
+        reg done;
+        reg debug_task_trace;
         reg head_in_rs;
         reg [31:0] got_reg;
         reg [31:0] got_mem;
@@ -860,7 +862,7 @@ module Top_tb;
             clear_caches();
             clear_mainmem();
             load_sum_program(start_pc);
-            if (idx == DEBUG_TASK_IDX) begin
+            if (idx == DEBUG_TASK_IDX && debug_task_trace) begin
                 $display("DBG_IMEM_INIT[%0d] start_pc=%h", idx, start_pc);
                 $display("DBG_IMEM[%0d] %h = %h", idx, start_pc + 32'h0078, peek_imem_word(start_pc + 32'h0078));
                 $display("DBG_IMEM[%0d] %h = %h", idx, start_pc + 32'h009C, peek_imem_word(start_pc + 32'h009C));
@@ -886,10 +888,15 @@ module Top_tb;
             commit_count = 0;
             cycles = 0;
             pass = 1'b1;
+            done = 1'b0;
+            debug_task_trace = 1'b0;
             last_commit_cycle = 0;
 
             begin : wait_task_commit
-                while (cycles < 4000 && commit_count < target_commits) begin
+                // Run until either:
+                // - we retire a commit at init_ra (task completion: main returns into halt loop), or
+                // - we hit a safety limit (cycles/commits) to avoid infinite loops.
+                while (cycles < 4000 && commit_count < target_commits && !done) begin
                     @(posedge clk);
                     #1;
                     cycles = cycles + 1;
@@ -905,6 +912,9 @@ module Top_tb;
                         if (dut.commit0_exception) begin
                             pass = 1'b0;
                         end
+                        if (dut.commit0_pc == init_ra) begin
+                            done = 1'b1;
+                        end
                     end
                     if (dut.commit1_valid) begin
                         commit_count = commit_count + 1;
@@ -918,8 +928,11 @@ module Top_tb;
                         if (dut.commit1_exception) begin
                             pass = 1'b0;
                         end
+                        if (dut.commit1_pc == init_ra) begin
+                            done = 1'b1;
+                        end
                     end
-                    if (idx == DEBUG_TASK_IDX) begin
+                    if (idx == DEBUG_TASK_IDX && debug_task_trace) begin
                         if (dut.global_flush) begin
                             $display("DBG_FLUSH[%0d] cyc=%0d redirect=%b target=%h rob_idx=%0d rob_head=%0d rob_empty=%b",
                                      idx, cycles, dut.redirect_valid, dut.redirect_target,
@@ -1052,7 +1065,7 @@ module Top_tb;
                         $display("TASK_REDIRECT[%0d] cyc=%0d target=%h inst=%h if_pc=%h",
                                  idx, cycles, dut.redirect_target, peek_imem_word(dut.redirect_target),
                                  dut.u_if.reg_PC);
-                        if (idx == DEBUG_TASK_IDX) begin
+                        if (idx == DEBUG_TASK_IDX && debug_task_trace) begin
                             $display("DBG_REDIRECT_STATE[%0d] issue0=%0d issue1=%0d br0=%b br1=%b br0_mis=%b br1_mis=%b",
                                      idx, dut.u_issue.issue_idx0, dut.u_issue.issue_idx1,
                                      dut.u_issue.br0_is_branch, dut.u_issue.br1_is_branch,
@@ -1101,7 +1114,7 @@ module Top_tb;
                                      peek_arch_reg(5'd10), peek_arch_reg(5'd14), peek_arch_reg(5'd15));
                         end
                     end
-                    if (idx == DEBUG_TASK_IDX && dut.u_issue.lsu_valid && !dut.u_issue.lsu_mem_is_load) begin
+                    if (idx == DEBUG_TASK_IDX && debug_task_trace && dut.u_issue.lsu_valid && !dut.u_issue.lsu_mem_is_load) begin
                         if (dut.u_issue.lsu_addr >= 32'h0000_1000 && dut.u_issue.lsu_addr < 32'h0000_1100) begin
                             $display("DBG_CODE_STORE[%0d] cyc=%0d addr=%h wdata=%h mem_op=%0d",
                                      idx, cycles, dut.u_issue.lsu_addr, dut.u_issue.lsu_wdata,
@@ -1109,14 +1122,19 @@ module Top_tb;
                         end
                     end
                 end
-                if (commit_count < target_commits) begin
-                    $display("TIMEOUT_TASK[%0d] commits=%0d/%0d", idx, commit_count, target_commits);
+                if (!done) begin
+                    debug_task_trace = 1'b1;
+                    if (cycles >= 4000) begin
+                        $display("TIMEOUT_TASK[%0d] commits=%0d/%0d", idx, commit_count, target_commits);
+                    end else begin
+                        $display("LIMIT_TASK[%0d] commits=%0d/%0d", idx, commit_count, target_commits);
+                    end
                     $display("DBG_TASK[%0d] cyc=%0d last_commit=%0d if=%b ib=%b pre=%b rn=%b post=%b rs_cnt=%0d rob_empty=%b rn_stall=%b issue_stall=%b disp_ready=%b flush=%b redirect=%b pc=%h",
                              idx, cycles, last_commit_cycle,
                              dut.if_inst_valid, dut.ib_valid, dut.pre_valid, dut.rn_valid, dut.post_valid,
                              dut.u_issue.rs_count, dut.rob_empty, dut.rn_stall, dut.issue_stall, dut.dispatch_ready,
                              dut.global_flush, dut.redirect_valid, dut.u_if.reg_PC);
-                    if (idx == DEBUG_TASK_IDX) begin
+                    if (idx == DEBUG_TASK_IDX && debug_task_trace) begin
                         head_in_rs = 1'b0;
                         for (r = 0; r < dut.u_issue.RS_DEPTH; r = r + 1) begin
                             if (dut.u_issue.rs_valid[r] && (dut.u_issue.rs_rob_idx[r] == dut.rob_head)) begin
@@ -1184,6 +1202,19 @@ module Top_tb;
                     $display("FAIL_TASK_MEM[%0d] addr=%h exp=%h got=%h",
                              idx, task_mem_addr[i], task_mem_val[i], got_mem);
                     pass = 1'b0;
+                end
+            end
+
+            if (!pass && idx == DEBUG_TASK_IDX) begin
+                debug_task_trace = 1'b1;
+                $display("DBG_FAIL_SUMMARY[%0d] commits=%0d done=%b cycles=%0d", idx, commit_count, done, cycles);
+                $display("DBG_FAIL_REGS[%0d] ra=%h sp=%h s0=%h a0=%h a1=%h a4=%h a5=%h",
+                         idx,
+                         peek_arch_reg(5'd1), peek_arch_reg(5'd2), peek_arch_reg(5'd8),
+                         peek_arch_reg(5'd10), peek_arch_reg(5'd11), peek_arch_reg(5'd14), peek_arch_reg(5'd15));
+                if (task_mem_count > 0) begin
+                    $display("DBG_FAIL_MEM0[%0d] addr=%h val=%h",
+                             idx, task_mem_addr[0], peek_mem_word(task_mem_addr[0]));
                 end
             end
 
@@ -1601,7 +1632,8 @@ module Top_tb;
         task_mem_val[task_mem_count] = 32'd145;
         task_mem_count = task_mem_count + 1;
 
-        run_task_test(70, 32'h0000_1000, 48, 32'h0000_0F00, 32'h0000_10C0);
+        // Commit budget is a safety limit; completion is detected by retiring a PC==init_ra (halt loop).
+        run_task_test(70, 32'h0000_1000, 256, 32'h0000_0F00, 32'h0000_10C0);
 
         $finish;
     end
