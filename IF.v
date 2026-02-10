@@ -46,10 +46,16 @@ module IF(
     output reg [`INST_ADDR_WIDTH-1:0] out_pred_target_1,
     output reg [`BP_GHR_BITS-1:0]     out_pred_hist_1
 );
+    localparam FETCH_EPOCH_BITS = 3;
+
     reg [`INST_ADDR_WIDTH-1:0] reg_PC;
     reg                        line_valid;
     reg [`INST_ADDR_WIDTH-1:4] line_base;
     reg [127:0]                line_data;
+    reg                        pending_line_req;
+    reg [FETCH_EPOCH_BITS-1:0] fetch_epoch;
+    reg [FETCH_EPOCH_BITS-1:0] pending_line_epoch;
+    reg [`INST_ADDR_WIDTH-1:4] pending_line_base;
 
     localparam [(`INST_ADDR_WIDTH-1):0] FETCH_STRIDE = `IF_BATCH_SIZE * `INST_ADD_STEP;
 
@@ -68,8 +74,10 @@ module IF(
     assign ic_req = (!stall) && (!flush) && (!redirect_valid) && need_line;
     assign ic_paddr = reg_PC;
 
-    wire [127:0] line_data_eff = ic_valid ? ic_rdata_line : line_data;
-    wire line_ready = line_hit || ic_valid;
+    wire accept_ic_line = ic_valid && pending_line_req && (pending_line_epoch == fetch_epoch);
+    wire accept_ic_line_match = accept_ic_line && (pending_line_base == reg_PC[31:4]);
+    wire [127:0] line_data_eff = accept_ic_line_match ? ic_rdata_line : line_data;
+    wire line_ready = line_hit || accept_ic_line_match;
     wire fetch_fire = (!stall) && (!ic_stall) && line_ready && (!flush) && (!redirect_valid);
 
     BranchPredictor u_bp (
@@ -121,6 +129,10 @@ module IF(
             line_valid <= 1'b0;
             line_base <= {(`INST_ADDR_WIDTH-4){1'b0}};
             line_data <= 128'b0;
+            pending_line_req <= 1'b0;
+            fetch_epoch <= {FETCH_EPOCH_BITS{1'b0}};
+            pending_line_epoch <= {FETCH_EPOCH_BITS{1'b0}};
+            pending_line_base <= {(`INST_ADDR_WIDTH-4){1'b0}};
             out_inst_addr_0 <= {`INST_WIDTH{1'b0}};
             out_inst_addr_1 <= {`INST_WIDTH{1'b0}};
             out_inst_0 <= {`INST_WIDTH{1'b0}};
@@ -135,6 +147,8 @@ module IF(
         end else if (flush) begin
             reg_PC <= redirect_valid ? redirect_pc : `INST_INIT;
             line_valid <= 1'b0;
+            pending_line_req <= 1'b0;
+            fetch_epoch <= fetch_epoch + 1'b1;
             out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
             out_pred_taken_0 <= 1'b0;
             out_pred_target_0 <= {`INST_ADDR_WIDTH{1'b0}};
@@ -142,11 +156,11 @@ module IF(
             out_pred_taken_1 <= 1'b0;
             out_pred_target_1 <= {`INST_ADDR_WIDTH{1'b0}};
             out_pred_hist_1 <= {`BP_GHR_BITS{1'b0}};
-        end else if (stall || ic_stall) begin
-            out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
         end else if (redirect_valid) begin
             reg_PC <= redirect_pc;
             line_valid <= 1'b0;
+            pending_line_req <= 1'b0;
+            fetch_epoch <= fetch_epoch + 1'b1;
             out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
             out_pred_taken_0 <= 1'b0;
             out_pred_target_0 <= {`INST_ADDR_WIDTH{1'b0}};
@@ -155,12 +169,20 @@ module IF(
             out_pred_target_1 <= {`INST_ADDR_WIDTH{1'b0}};
             out_pred_hist_1 <= {`BP_GHR_BITS{1'b0}};
         end else begin
-            if (ic_valid) begin
-                line_valid <= 1'b1;
-                line_base  <= reg_PC[31:4];
-                line_data  <= ic_rdata_line;
+            if (ic_req && !pending_line_req) begin
+                pending_line_req <= 1'b1;
+                pending_line_epoch <= fetch_epoch;
+                pending_line_base <= reg_PC[31:4];
             end
-            if (line_ready) begin
+            if (accept_ic_line) begin
+                line_valid <= 1'b1;
+                line_base  <= pending_line_base;
+                line_data  <= ic_rdata_line;
+                pending_line_req <= 1'b0;
+            end
+            if (stall || ic_stall) begin
+                out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
+            end else if (line_ready) begin
                 reg_PC <= chosen_target;
                 out_inst_addr_0 <= reg_PC;
                 out_inst_addr_1 <= reg_PC + `INST_ADD_STEP;

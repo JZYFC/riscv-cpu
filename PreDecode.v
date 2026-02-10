@@ -6,6 +6,7 @@ module PreDecode (
     input clk,
     input rst_n,
     input stall,
+    input flush,
 
     input  wire [`INST_WIDTH-1:0] in_inst_0,
     input  wire [`INST_WIDTH-1:0] in_inst_1,
@@ -267,6 +268,38 @@ endfunction
 // Single-cycle registered decode
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
+        out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
+        out_inst_0 <= {`INST_WIDTH{1'b0}};
+        out_inst_1 <= {`INST_WIDTH{1'b0}};
+        out_pc_0 <= {`INST_ADDR_WIDTH{1'b0}};
+        out_pc_1 <= {`INST_ADDR_WIDTH{1'b0}};
+        out_pred_taken_0 <= 1'b0;
+        out_pred_target_0 <= {`INST_ADDR_WIDTH{1'b0}};
+        out_pred_hist_0 <= {`BP_GHR_BITS{1'b0}};
+        out_pred_taken_1 <= 1'b0;
+        out_pred_target_1 <= {`INST_ADDR_WIDTH{1'b0}};
+        out_pred_hist_1 <= {`BP_GHR_BITS{1'b0}};
+
+        out_fu_type_0  <= `ALU_TYPE_INT;
+        out_rs1_0      <= {`REG_ADDR_WIDTH{1'b0}};
+        out_rs2_0      <= {`REG_ADDR_WIDTH{1'b0}};
+        out_rd_0       <= {`REG_ADDR_WIDTH{1'b0}};
+        out_imm_0      <= {`DATA_WIDTH{1'b0}};
+        out_use_imm_0  <= 1'b0;
+        out_rs1_is_fp_0<= 1'b0;
+        out_rs2_is_fp_0<= 1'b0;
+        out_rd_is_fp_0 <= 1'b0;
+
+        out_fu_type_1  <= `ALU_TYPE_INT;
+        out_rs1_1      <= {`REG_ADDR_WIDTH{1'b0}};
+        out_rs2_1      <= {`REG_ADDR_WIDTH{1'b0}};
+        out_rd_1       <= {`REG_ADDR_WIDTH{1'b0}};
+        out_imm_1      <= {`DATA_WIDTH{1'b0}};
+        out_use_imm_1  <= 1'b0;
+        out_rs1_is_fp_1<= 1'b0;
+        out_rs2_is_fp_1<= 1'b0;
+        out_rd_is_fp_1 <= 1'b0;
+    end else if (flush) begin
         out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
         out_inst_0 <= {`INST_WIDTH{1'b0}};
         out_inst_1 <= {`INST_WIDTH{1'b0}};

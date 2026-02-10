@@ -129,11 +129,12 @@ module BranchPredictor #(
                 btb_valid[i]  <= 1'b0;
                 btb_is_ret[i] <= 1'b0;
             end
-        end else if (flush) begin
-            ghr <= {GHR_BITS{1'b0}};
-            ras_sp <= 0;
         end else begin
-            // Apply updates in-order
+            // Do not clear predictor state on pipeline flush.
+            // Redirect flush is one cycle after branch resolution; resetting here drops
+            // the very update that should train the predictor and causes repeat
+            // mispredict loops (e.g. TASK[70] at PC 0x10c0).
+            // Apply updates in-order every cycle.
             apply_update(update0_valid, update0_pc, update0_taken, update0_target, update0_hist, update0_is_call, update0_is_return);
             apply_update(update1_valid, update1_pc, update1_taken, update1_target, update1_hist, update1_is_call, update1_is_return);
         end

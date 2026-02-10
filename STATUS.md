@@ -5,7 +5,7 @@ This document summarizes the current two-wide OoO core as wired today (including
 ## Quick Snapshot
 - Pipeline: IF → InstructionBuffer → PreDecode → RegRename/ROB → PostDecode → DispatchQueue → Issue/Execute → Commit.
 - Width: 2-wide fetch/rename/issue/commit; shared int/fp physical register file (64 int + 64 fp). Default queue depths: InstructionBuffer=8, Issue RS=8.
-- Control: Global flush on branch mispredict (issue redirect) or `commit0_exception` to `TRAP_VECTOR`; commit1 is suppressed on commit0 exception; redirect recovery now guards the one-cycle "branch already committed" window so wrapped ROB ranges do not retain wrong-path uops; predictor flush clears GHR/RAS only.
+- Control: Global flush on branch mispredict (issue redirect) or `commit0_exception` to `TRAP_VECTOR`; commit1 is suppressed on commit0 exception; redirect recovery now guards the one-cycle "branch already committed" window so wrapped ROB ranges do not retain wrong-path uops; predictor state is not cleared by pipeline flush so mispredict training is preserved; `PreDecode`/`PostDecode` pipeline registers are also explicitly cleared on flush to prevent wrong-path reinjection.
 - ROB integrity: WB acceptance is now guarded by `{rob_idx, rob_gen}` matching. Each ROB slot carries a generation tag that increments on re-allocation, so stale late writebacks from squashed/reused slots are ignored.
 - Execute coverage: Integer ALU, branch/JAL/JALR (link), CSR array ops (4K CSR file), mul (combinational), div (fixed 8-count, single in-flight), basic FP add/sub/mul via `ibex_fpu` (combinational, 2-source only). LSU integrated with single outstanding/ordered issue (TLB + DCache).
 - Fetch status: Predictor wired; IF fetches from ICache (128-bit line buffer), stalls on miss; if predicted taken, slot1 is suppressed; if slot1 crosses a line, slot1 is suppressed.
@@ -25,7 +25,7 @@ This document summarizes the current two-wide OoO core as wired today (including
 - **Legacy helpers**: `FU.v` remains as a legacy/simple block; current pipeline uses IssueBuffer for execution.
 
 ## What Works Today
-- Prediction pipeline (Gshare+BTB+RAS) with redirect and dual training ports; flush clears GHR/RAS (PHT/BTB persist).
+- Prediction pipeline (Gshare+BTB+RAS) with redirect and dual training ports; branch updates are applied even on redirect flush cycles (prevents lost training and redirect loops).
 - Rename supports int/fp maps, returns old physicals on commit; ROB enforces in-order retirement and exception gating for commit1.
 - Shared PRF with bypass; IssueBuffer uses it for operand reads and writes.
 - Issue/execute covers integer ALU, branches/JAL/JALR, CSR array ops, mul, fixed-latency div, basic FP add/sub/mul via `ibex_fpu`, and ordered LSU; DispatchQueue decouples post-decode from RS pressure; CDB writes PRF and ROB.
@@ -36,7 +36,13 @@ This document summarizes the current two-wide OoO core as wired today (including
 - CDB arbitration still only supports two producers; if LSU completes in the same cycle as two other producers, one result can be dropped.
 - Stale WB filtering is now implemented end-to-end (`RegRename`/`ROB`, `PostDecode`, `DispatchQueue`, `IssueBuffer`, `LSU`, `Top`) via ROB generation tags; regression simulation is still required to confirm the previous TASK[70] commit/memory mismatch is fully resolved.
 - Redirect recovery now handles the delayed-flush edge case where `rob_head` advances past `flush_rob_idx` before flush is applied; `IssueBuffer` and `RegRename` treat that case as "no survivors" instead of applying wrapped in-range filters.
-- Current failing root cause (TASK[70]) is instruction-stream corruption after redirect/trap recovery: in the same test, fetch at `pc=0x104c` is seen once as `0x02812423` and later as `0x00000000`, followed by `pc=0x1044` committing with `exc=1` even though it is `addi sp,sp,-48`; this points to cache/memory path inconsistency rather than rename/ROB-only logic.
+- Predictor flush/update ordering was fixed in `BranchPredictor.v`: pipeline flush no longer suppresses predictor updates, which addressed repeated mispredict loops and wrong-path exception commits in TASK[70].
+- Decode-pipeline flush gap was fixed (`PreDecode.v`, `PostDecode.v`, `Top.v`): both decode register stages now consume `global_flush` and bubble outputs immediately on flush, preventing stale wrong-path uops with old ROB tags from being re-enqueued after recovery.
+- TASK[70] is still blocked by fetch/data memory transaction instability:
+  - `MainMemory.v` completes requests using live `mem_addr` (not latched accepted address).
+  - `MemArbiter.v` serves `SERVE_D/SERVE_I` using live `d_*` / `i_*` signals (not latched in-flight fields).
+  - `Cache.v` miss/writeback path still references live `paddr/we/wdata/offset` during `WRITEBACK/REFILL`.
+  - Under mixed I/D traffic this can refill/return the wrong line, producing PC/instruction mismatches (observed in TASK[70] log) and early fall-through to `0x10c0`.
 - Rename free list recovery remains risky: redirect recovery rebuilds free-list contents from checkpoints/ROB visibility rather than restoring a true per-checkpoint queue image, so multi-redirect corner cases can still mis-allocate physical registers.
 - FP compare/cvt and destination typing are inconsistent: OP-FP compare decodes to `FP_OP_CMP` (alias of DUMMY), and compare results are routed to FP regs instead of integer regs.
 - FP div/sqrt/cvt/fma semantics are not implemented; FMA uses C=0 in the current wiring.

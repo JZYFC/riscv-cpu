@@ -7,6 +7,7 @@ module PostDecode (
     input clk,
     input rst_n,
     input stall,
+    input flush,
 
     // Incoming bundle from rename
     input  wire [`IF_BATCH_SIZE-1:0]   in_inst_valid,
@@ -457,6 +458,96 @@ end
 // Registered outputs
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
+        out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
+        out_inst_0 <= {`INST_WIDTH{1'b0}};
+        out_inst_1 <= {`INST_WIDTH{1'b0}};
+        out_fu_type_0 <= 2'b0;
+        out_fu_type_1 <= 2'b0;
+        out_pc_0 <= {`INST_ADDR_WIDTH{1'b0}};
+        out_pc_1 <= {`INST_ADDR_WIDTH{1'b0}};
+        out_pred_taken_0 <= 1'b0;
+        out_pred_target_0 <= {`INST_ADDR_WIDTH{1'b0}};
+        out_pred_hist_0 <= {`BP_GHR_BITS{1'b0}};
+        out_rs1_0 <= {`REG_ADDR_WIDTH{1'b0}};
+        out_rs2_0 <= {`REG_ADDR_WIDTH{1'b0}};
+        out_rd_0  <= {`REG_ADDR_WIDTH{1'b0}};
+        out_imm_0 <= {`DATA_WIDTH{1'b0}};
+        out_use_imm_0 <= 1'b0;
+        out_rs1_is_fp_0 <= 1'b0;
+        out_rs2_is_fp_0 <= 1'b0;
+        out_rd_is_fp_0  <= 1'b0;
+        out_rob_idx_0 <= {`ROB_IDX_WIDTH{1'b0}};
+        out_rob_idx_valid_0 <= 1'b0;
+        out_rob_gen_0 <= {`ROB_GEN_WIDTH{1'b0}};
+        out_rs1_preg_0 <= {`PREG_IDX_WIDTH{1'b0}};
+        out_rs1_preg_valid_0 <= 1'b0;
+        out_rs2_preg_0 <= {`PREG_IDX_WIDTH{1'b0}};
+        out_rs2_preg_valid_0 <= 1'b0;
+        out_rd_preg_0 <= {`PREG_IDX_WIDTH{1'b0}};
+        out_rd_preg_valid_0 <= 1'b0;
+        out_old_rd_preg_0 <= {`PREG_IDX_WIDTH{1'b0}};
+        out_old_rd_preg_valid_0 <= 1'b0;
+
+        out_rs1_1 <= {`REG_ADDR_WIDTH{1'b0}};
+        out_rs2_1 <= {`REG_ADDR_WIDTH{1'b0}};
+        out_rd_1  <= {`REG_ADDR_WIDTH{1'b0}};
+        out_imm_1 <= {`DATA_WIDTH{1'b0}};
+        out_use_imm_1 <= 1'b0;
+        out_rs1_is_fp_1 <= 1'b0;
+        out_rs2_is_fp_1 <= 1'b0;
+        out_rd_is_fp_1  <= 1'b0;
+        out_pred_taken_1 <= 1'b0;
+        out_pred_target_1 <= {`INST_ADDR_WIDTH{1'b0}};
+        out_pred_hist_1 <= {`BP_GHR_BITS{1'b0}};
+        out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
+        out_rob_idx_valid_1 <= 1'b0;
+        out_rob_gen_1 <= {`ROB_GEN_WIDTH{1'b0}};
+        out_rs1_preg_1 <= {`PREG_IDX_WIDTH{1'b0}};
+        out_rs1_preg_valid_1 <= 1'b0;
+        out_rs2_preg_1 <= {`PREG_IDX_WIDTH{1'b0}};
+        out_rs2_preg_valid_1 <= 1'b0;
+        out_rd_preg_1 <= {`PREG_IDX_WIDTH{1'b0}};
+        out_rd_preg_valid_1 <= 1'b0;
+        out_old_rd_preg_1 <= {`PREG_IDX_WIDTH{1'b0}};
+        out_old_rd_preg_valid_1 <= 1'b0;
+
+        out_fu_sel_0 <= `FU_DEC_DUMMY;
+        out_fu_sel_1 <= `FU_DEC_DUMMY;
+        out_int_op_0 <= {`ALU_OP_WIDTH{1'b0}};
+        out_int_op_1 <= {`ALU_OP_WIDTH{1'b0}};
+        out_int_is_sub_0 <= 1'b0;
+        out_int_is_sub_1 <= 1'b0;
+        out_cmp_signed_0 <= 1'b0;
+        out_cmp_signed_1 <= 1'b0;
+        out_muldiv_op_0 <= {`ALU_OP_WIDTH{1'b0}};
+        out_muldiv_op_1 <= {`ALU_OP_WIDTH{1'b0}};
+        out_mul_high_0 <= 1'b0;
+        out_mul_high_1 <= 1'b0;
+        out_mul_signed_rs1_0 <= 1'b0;
+        out_mul_signed_rs1_1 <= 1'b0;
+        out_mul_signed_rs2_0 <= 1'b0;
+        out_mul_signed_rs2_1 <= 1'b0;
+        out_div_signed_0 <= 1'b0;
+        out_div_signed_1 <= 1'b0;
+        out_div_is_rem_0 <= 1'b0;
+        out_div_is_rem_1 <= 1'b0;
+        out_branch_op_0 <= `BR_OP_NONE;
+        out_branch_op_1 <= `BR_OP_NONE;
+        out_mem_op_0 <= {`MEM_OP_WIDTH{1'b0}};
+        out_mem_op_1 <= {`MEM_OP_WIDTH{1'b0}};
+        out_mem_is_load_0 <= 1'b0;
+        out_mem_is_load_1 <= 1'b0;
+        out_mem_unsigned_0 <= 1'b0;
+        out_mem_unsigned_1 <= 1'b0;
+        out_csr_op_0 <= `CSR_OP_NONE;
+        out_csr_op_1 <= `CSR_OP_NONE;
+        out_csr_addr_0 <= 12'b0;
+        out_csr_addr_1 <= 12'b0;
+        out_fp_op_0 <= `FP_OP_DUMMY;
+        out_fp_op_1 <= `FP_OP_DUMMY;
+        out_illegal_0 <= 1'b0;
+        out_illegal_1 <= 1'b0;
+    end else if (flush) begin
         out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
         out_inst_0 <= {`INST_WIDTH{1'b0}};
         out_inst_1 <= {`INST_WIDTH{1'b0}};

@@ -154,13 +154,13 @@ module ROB #(
         end
     endfunction
 
-    function in_range;
+    function in_range_inclusive;
         input [ROB_IDX_WIDTH-1:0] idx;
         input [ROB_IDX_WIDTH-1:0] start;
         input [ROB_IDX_WIDTH-1:0] var_end;
         begin
-            if (start <= var_end) in_range = (idx >= start) && (idx < var_end);
-            else in_range = (idx >= start) || (idx < var_end);
+            if (start <= var_end) in_range_inclusive = (idx >= start) && (idx <= var_end);
+            else in_range_inclusive = (idx >= start) || (idx <= var_end);
         end
     endfunction
 
@@ -205,7 +205,11 @@ module ROB #(
                 commit1_rob_idx <= {ROB_IDX_WIDTH{1'b0}};
                 if (flush_is_redirect && entry_valid[flush_rob_idx]) begin
                     for (i=0;i<ROB_SIZE;i=i+1) begin
-                        if (in_range(i[ROB_IDX_WIDTH-1:0], ptr_inc(flush_rob_idx), tail)) begin
+                        // Keep only [head .. flush_rob_idx] (older/equal than redirecting branch).
+                        // Do not use (flush+1 .. tail) range directly because tail can equal
+                        // flush+1 when the ring wrapped, which would otherwise look empty and
+                        // leak younger wrong-path entries.
+                        if (entry_valid[i] && !in_range_inclusive(i[ROB_IDX_WIDTH-1:0], head, flush_rob_idx)) begin
                             entry_valid[i]<=1'b0;
                             entry_ready[i]<=1'b0;
                             entry_exception[i]<=1'b0;
