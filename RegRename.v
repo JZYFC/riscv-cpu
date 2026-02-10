@@ -6,7 +6,8 @@
 module ROB #(
     parameter ROB_SIZE       = `ROB_SIZE,
     parameter ROB_IDX_WIDTH  = `ROB_IDX_WIDTH,
-    parameter PREG_IDX_WIDTH = `PREG_IDX_WIDTH
+    parameter PREG_IDX_WIDTH = `PREG_IDX_WIDTH,
+    parameter ROB_GEN_WIDTH  = `ROB_GEN_WIDTH
 )(
     input  wire                        clk,
     input  wire                        rst_n,
@@ -21,6 +22,7 @@ module ROB #(
     input  wire [PREG_IDX_WIDTH-1:0]   alloc0_old_preg,
     output wire                        alloc0_ready,
     output wire [ROB_IDX_WIDTH-1:0]    alloc0_rob_idx,
+    output wire [ROB_GEN_WIDTH-1:0]    alloc0_rob_gen,
 
     input  wire                        alloc1_valid,
     input  wire [`INST_ADDR_WIDTH-1:0] alloc1_pc,
@@ -31,20 +33,24 @@ module ROB #(
     input  wire [PREG_IDX_WIDTH-1:0]   alloc1_old_preg,
     output wire                        alloc1_ready,
     output wire [ROB_IDX_WIDTH-1:0]    alloc1_rob_idx,
+    output wire [ROB_GEN_WIDTH-1:0]    alloc1_rob_gen,
 
     // Writeback (2 per cycle)
     input  wire                        wb0_valid,
     input  wire [ROB_IDX_WIDTH-1:0]    wb0_rob_idx,
+    input  wire [ROB_GEN_WIDTH-1:0]    wb0_rob_gen,
     input  wire [`DATA_WIDTH-1:0]      wb0_value,
     input  wire                        wb0_exception,
 
     input  wire                        wb1_valid,
     input  wire [ROB_IDX_WIDTH-1:0]    wb1_rob_idx,
+    input  wire [ROB_GEN_WIDTH-1:0]    wb1_rob_gen,
     input  wire [`DATA_WIDTH-1:0]      wb1_value,
     input  wire                        wb1_exception,
 
     input  wire                        wb2_valid,
     input  wire [ROB_IDX_WIDTH-1:0]    wb2_rob_idx,
+    input  wire [ROB_GEN_WIDTH-1:0]    wb2_rob_gen,
     input  wire [`DATA_WIDTH-1:0]      wb2_value,
     input  wire                        wb2_exception,
 
@@ -99,6 +105,7 @@ module ROB #(
     reg [PREG_IDX_WIDTH-1:0]   entry_old_preg    [0:ROB_SIZE-1];
     reg [`DATA_WIDTH-1:0]      entry_value       [0:ROB_SIZE-1];
     reg                        entry_exception   [0:ROB_SIZE-1];
+    reg [ROB_GEN_WIDTH-1:0]    entry_gen         [0:ROB_SIZE-1];
 
     reg [ROB_IDX_WIDTH-1:0] head;
     reg [ROB_IDX_WIDTH-1:0] tail;
@@ -111,20 +118,30 @@ module ROB #(
 
     assign rob_empty = (count == 0);
     assign rob_head = head;
-    assign wb0_has_dest = wb0_valid && entry_valid[wb0_rob_idx] && entry_has_dest[wb0_rob_idx];
-    assign wb0_is_float = (wb0_valid && entry_valid[wb0_rob_idx]) ? entry_is_float[wb0_rob_idx] : 1'b0;
-    assign wb0_new_preg = (wb0_valid && entry_valid[wb0_rob_idx]) ? entry_new_preg[wb0_rob_idx] : {PREG_IDX_WIDTH{1'b0}};
-    assign wb1_has_dest = wb1_valid && entry_valid[wb1_rob_idx] && entry_has_dest[wb1_rob_idx];
-    assign wb1_is_float = (wb1_valid && entry_valid[wb1_rob_idx]) ? entry_is_float[wb1_rob_idx] : 1'b0;
-    assign wb1_new_preg = (wb1_valid && entry_valid[wb1_rob_idx]) ? entry_new_preg[wb1_rob_idx] : {PREG_IDX_WIDTH{1'b0}};
-    assign wb2_has_dest = wb2_valid && entry_valid[wb2_rob_idx] && entry_has_dest[wb2_rob_idx];
-    assign wb2_is_float = (wb2_valid && entry_valid[wb2_rob_idx]) ? entry_is_float[wb2_rob_idx] : 1'b0;
-    assign wb2_new_preg = (wb2_valid && entry_valid[wb2_rob_idx]) ? entry_new_preg[wb2_rob_idx] : {PREG_IDX_WIDTH{1'b0}};
+    wire wb0_match = wb0_valid && entry_valid[wb0_rob_idx] && (entry_gen[wb0_rob_idx] == wb0_rob_gen);
+    wire wb1_match = wb1_valid && entry_valid[wb1_rob_idx] && (entry_gen[wb1_rob_idx] == wb1_rob_gen);
+    wire wb2_match = wb2_valid && entry_valid[wb2_rob_idx] && (entry_gen[wb2_rob_idx] == wb2_rob_gen);
+    assign wb0_has_dest = wb0_match && entry_has_dest[wb0_rob_idx];
+    assign wb0_is_float = wb0_match ? entry_is_float[wb0_rob_idx] : 1'b0;
+    assign wb0_new_preg = wb0_match ? entry_new_preg[wb0_rob_idx] : {PREG_IDX_WIDTH{1'b0}};
+    assign wb1_has_dest = wb1_match && entry_has_dest[wb1_rob_idx];
+    assign wb1_is_float = wb1_match ? entry_is_float[wb1_rob_idx] : 1'b0;
+    assign wb1_new_preg = wb1_match ? entry_new_preg[wb1_rob_idx] : {PREG_IDX_WIDTH{1'b0}};
+    assign wb2_has_dest = wb2_match && entry_has_dest[wb2_rob_idx];
+    assign wb2_is_float = wb2_match ? entry_is_float[wb2_rob_idx] : 1'b0;
+    assign wb2_new_preg = wb2_match ? entry_new_preg[wb2_rob_idx] : {PREG_IDX_WIDTH{1'b0}};
 
     function [ROB_IDX_WIDTH-1:0] ptr_inc;
         input [ROB_IDX_WIDTH-1:0] ptr;
         begin
             ptr_inc = (ptr == ROB_SIZE-1) ? {ROB_IDX_WIDTH{1'b0}} : ptr + 1'b1;
+        end
+    endfunction
+
+    function [ROB_GEN_WIDTH-1:0] gen_inc;
+        input [ROB_GEN_WIDTH-1:0] gen;
+        begin
+            gen_inc = gen + {{(ROB_GEN_WIDTH-1){1'b0}}, 1'b1};
         end
     endfunction
 
@@ -160,6 +177,8 @@ module ROB #(
     assign alloc1_ready   = alloc1_can;
     assign alloc0_rob_idx = tail;
     assign alloc1_rob_idx = do_alloc0 ? ptr_inc(tail) : tail;
+    assign alloc0_rob_gen = gen_inc(entry_gen[tail]);
+    assign alloc1_rob_gen = gen_inc(entry_gen[alloc1_rob_idx]);
 
     integer i;
     always @(posedge clk or negedge rst_n) begin
@@ -176,6 +195,7 @@ module ROB #(
                 entry_pc[i]<= {`INST_ADDR_WIDTH{1'b0}}; entry_has_dest[i]<=1'b0; entry_is_float[i]<=1'b0;
                 entry_arch_rd[i]<= {`REG_ADDR_WIDTH{1'b0}}; entry_new_preg[i]<= {PREG_IDX_WIDTH{1'b0}};
                 entry_old_preg[i]<= {PREG_IDX_WIDTH{1'b0}}; entry_value[i]<= {`DATA_WIDTH{1'b0}};
+                entry_gen[i] <= {ROB_GEN_WIDTH{1'b0}};
             end
         end else begin
             commit0_valid <= 1'b0; commit1_valid <= 1'b0;
@@ -200,17 +220,17 @@ module ROB #(
                     end
                 end
             end else begin
-                if (wb0_valid) begin
+                if (wb0_match) begin
                     entry_value[wb0_rob_idx]     <= wb0_value;
                     entry_ready[wb0_rob_idx]     <= 1'b1;
                     entry_exception[wb0_rob_idx] <= wb0_exception;
                 end
-                if (wb1_valid) begin
+                if (wb1_match) begin
                     entry_value[wb1_rob_idx]     <= wb1_value;
                     entry_ready[wb1_rob_idx]     <= 1'b1;
                     entry_exception[wb1_rob_idx] <= wb1_exception;
                 end
-                if (wb2_valid) begin
+                if (wb2_match) begin
                     entry_value[wb2_rob_idx]     <= wb2_value;
                     entry_ready[wb2_rob_idx]     <= 1'b1;
                     entry_exception[wb2_rob_idx] <= wb2_exception;
@@ -229,6 +249,7 @@ module ROB #(
                     entry_old_preg[tail_next]   <= alloc0_old_preg;
                     entry_value[tail_next]      <= {`DATA_WIDTH{1'b0}};
                     entry_exception[tail_next]  <= 1'b0;
+                    entry_gen[tail_next]        <= alloc0_rob_gen;
                     tail_next  = ptr_inc(tail_next);
                     count_next = count_next + 1'b1;
                 end
@@ -243,6 +264,7 @@ module ROB #(
                     entry_old_preg[tail_next]   <= alloc1_old_preg;
                     entry_value[tail_next]      <= {`DATA_WIDTH{1'b0}};
                     entry_exception[tail_next]  <= 1'b0;
+                    entry_gen[tail_next]        <= alloc1_rob_gen;
                     tail_next  = ptr_inc(tail_next);
                     count_next = count_next + 1'b1;
                 end
@@ -343,15 +365,18 @@ module RegRename #(
     // Writeback path into ROB
     input  wire                        wb0_valid,
     input  wire [`ROB_IDX_WIDTH-1:0]   wb0_rob_idx,
+    input  wire [`ROB_GEN_WIDTH-1:0]   wb0_rob_gen,
     input  wire [`DATA_WIDTH-1:0]      wb0_value,
     input  wire                        wb0_exception,
     input  wire                        wb1_valid,
     input  wire [`ROB_IDX_WIDTH-1:0]   wb1_rob_idx,
+    input  wire [`ROB_GEN_WIDTH-1:0]   wb1_rob_gen,
     input  wire [`DATA_WIDTH-1:0]      wb1_value,
     input  wire                        wb1_exception,
 
     input  wire                        wb2_valid,
     input  wire [`ROB_IDX_WIDTH-1:0]   wb2_rob_idx,
+    input  wire [`ROB_GEN_WIDTH-1:0]   wb2_rob_gen,
     input  wire [`DATA_WIDTH-1:0]      wb2_value,
     input  wire                        wb2_exception,
 
@@ -395,8 +420,10 @@ module RegRename #(
     output reg                         out_rd_is_fp_1,
     output reg  [`ROB_IDX_WIDTH-1:0]   out_rob_idx_0,
     output reg                         out_rob_idx_valid_0,
+    output reg  [`ROB_GEN_WIDTH-1:0]   out_rob_gen_0,
     output reg  [`ROB_IDX_WIDTH-1:0]   out_rob_idx_1,
     output reg                         out_rob_idx_valid_1,
+    output reg  [`ROB_GEN_WIDTH-1:0]   out_rob_gen_1,
     output reg  [`PREG_IDX_WIDTH-1:0]  out_rs1_preg_1,
     output reg                         out_rs1_preg_valid_1,
     output reg  [`PREG_IDX_WIDTH-1:0]  out_rs2_preg_1,
@@ -499,6 +526,12 @@ function in_range_inclusive;
         else in_range_inclusive = (idx >= start) || (idx <= var_end);
     end
 endfunction
+wire [`ROB_IDX_WIDTH-1:0] flush_rob_idx_next =
+    (flush_rob_idx == (`ROB_SIZE-1)) ? {`ROB_IDX_WIDTH{1'b0}} : (flush_rob_idx + 1'b1);
+// Redirect recovery is applied one cycle after redirect generation. If the
+// redirecting branch committed in that cycle, rob_head already moved past it.
+// Treat that as "no in-flight survivors" to avoid wrapped-range false matches.
+wire redirect_keep_none = flush_is_redirect && (rob_head == flush_rob_idx_next);
 
 // Map snapshots after allocation (combinational helpers)
 reg [`PREG_IDX_WIDTH-1:0] int_map_after0 [0:ARCH_REGS-1];
@@ -515,6 +548,8 @@ wire alloc0_ready;
 wire alloc1_ready;
 wire [`ROB_IDX_WIDTH-1:0] alloc0_rob_idx;
 wire [`ROB_IDX_WIDTH-1:0] alloc1_rob_idx;
+wire [`ROB_GEN_WIDTH-1:0] alloc0_rob_gen;
+wire [`ROB_GEN_WIDTH-1:0] alloc1_rob_gen;
 
 // Internal allocation bookkeeping
 wire has_dest0 = in_inst_valid[0] && (in_rd_is_fp_0 || (in_rd_0 != {`REG_ADDR_WIDTH{1'b0}}));
@@ -705,6 +740,7 @@ ROB #(.PREG_IDX_WIDTH(`PREG_IDX_WIDTH)) u_rob (
     .alloc0_old_preg (old_preg0),
     .alloc0_ready    (alloc0_ready),
     .alloc0_rob_idx  (alloc0_rob_idx),
+    .alloc0_rob_gen  (alloc0_rob_gen),
 
     .alloc1_valid    (rob_req1 && !flush && int_can_alloc && fp_can_alloc && rename_fire),
     .alloc1_pc       (in_pc_1),
@@ -715,18 +751,22 @@ ROB #(.PREG_IDX_WIDTH(`PREG_IDX_WIDTH)) u_rob (
     .alloc1_old_preg (old_preg1),
     .alloc1_ready    (alloc1_ready),
     .alloc1_rob_idx  (alloc1_rob_idx),
+    .alloc1_rob_gen  (alloc1_rob_gen),
 
     .wb0_valid       (wb0_valid),
     .wb0_rob_idx     (wb0_rob_idx),
+    .wb0_rob_gen     (wb0_rob_gen),
     .wb0_value       (wb0_value),
     .wb0_exception   (wb0_exception),
 
     .wb1_valid       (wb1_valid),
     .wb1_rob_idx     (wb1_rob_idx),
+    .wb1_rob_gen     (wb1_rob_gen),
     .wb1_value       (wb1_value),
     .wb1_exception   (wb1_exception),
     .wb2_valid       (wb2_valid),
     .wb2_rob_idx     (wb2_rob_idx),
+    .wb2_rob_gen     (wb2_rob_gen),
     .wb2_value       (wb2_value),
     .wb2_exception   (wb2_exception),
     .wb0_has_dest    (wb0_has_dest),
@@ -810,8 +850,10 @@ always @(posedge clk or negedge rst_n) begin
         out_rd_is_fp_1  <= 1'b0;
         out_rob_idx_0 <= {`ROB_IDX_WIDTH{1'b0}};
         out_rob_idx_valid_0 <= 1'b0;
+        out_rob_gen_0 <= {`ROB_GEN_WIDTH{1'b0}};
         out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
         out_rob_idx_valid_1 <= 1'b0;
+        out_rob_gen_1 <= {`ROB_GEN_WIDTH{1'b0}};
         out_rs1_preg_1 <= {`PREG_IDX_WIDTH{1'b0}};
         out_rs1_preg_valid_1 <= 1'b0;
         out_rs2_preg_1 <= {`PREG_IDX_WIDTH{1'b0}};
@@ -822,8 +864,10 @@ always @(posedge clk or negedge rst_n) begin
         out_old_rd_preg_valid_1 <= 1'b0;
         out_rob_idx_0 <= {`ROB_IDX_WIDTH{1'b0}};
         out_rob_idx_valid_0 <= 1'b0;
+        out_rob_gen_0 <= {`ROB_GEN_WIDTH{1'b0}};
         out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
         out_rob_idx_valid_1 <= 1'b0;
+        out_rob_gen_1 <= {`ROB_GEN_WIDTH{1'b0}};
         int_free_head <= 0;
         int_free_tail <= INT_FREE_INIT_TAIL;
         int_free_count <= INT_FREE_INIT_TAIL;
@@ -880,8 +924,10 @@ always @(posedge clk or negedge rst_n) begin
         out_rs1_preg_valid_1 <= 1'b0; out_rs2_preg_valid_1 <= 1'b0; out_rd_preg_valid_1 <= 1'b0; out_old_rd_preg_valid_1 <= 1'b0;
         out_rob_idx_0 <= {`ROB_IDX_WIDTH{1'b0}};
         out_rob_idx_valid_0 <= 1'b0;
+        out_rob_gen_0 <= {`ROB_GEN_WIDTH{1'b0}};
         out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
         out_rob_idx_valid_1 <= 1'b0;
+        out_rob_gen_1 <= {`ROB_GEN_WIDTH{1'b0}};
         if (flush_is_redirect) begin
             for (i=0; i<ARCH_REGS; i=i+1) begin
                 int_map[i] <= int_map_cp[flush_rob_idx][i];
@@ -898,7 +944,8 @@ always @(posedge clk or negedge rst_n) begin
                 end
             end
             for (k = 0; k < `ROB_SIZE; k = k + 1) begin
-                if (u_rob.entry_valid[k] && in_range_inclusive(k[`ROB_IDX_WIDTH-1:0], rob_head, flush_rob_idx) &&
+                if (!redirect_keep_none &&
+                    u_rob.entry_valid[k] && in_range_inclusive(k[`ROB_IDX_WIDTH-1:0], rob_head, flush_rob_idx) &&
                     u_rob.entry_has_dest[k] && !u_rob.entry_is_float[k] &&
                     (u_rob.entry_old_preg[k] != {`PREG_IDX_WIDTH{1'b0}})) begin
                     int_used[u_rob.entry_old_preg[k]] = 1'b1;
@@ -922,7 +969,8 @@ always @(posedge clk or negedge rst_n) begin
                 end
             end
             for (k = 0; k < `ROB_SIZE; k = k + 1) begin
-                if (u_rob.entry_valid[k] && in_range_inclusive(k[`ROB_IDX_WIDTH-1:0], rob_head, flush_rob_idx) &&
+                if (!redirect_keep_none &&
+                    u_rob.entry_valid[k] && in_range_inclusive(k[`ROB_IDX_WIDTH-1:0], rob_head, flush_rob_idx) &&
                     u_rob.entry_has_dest[k] && u_rob.entry_is_float[k] &&
                     (u_rob.entry_old_preg[k] != {`PREG_IDX_WIDTH{1'b0}})) begin
                     fp_used[u_rob.entry_old_preg[k]] = 1'b1;
@@ -945,7 +993,8 @@ always @(posedge clk or negedge rst_n) begin
                 fp_preg_ready[i] <= 1'b1;
             end
             for (k = 0; k < `ROB_SIZE; k = k + 1) begin
-                if (u_rob.entry_valid[k] && in_range_inclusive(k[`ROB_IDX_WIDTH-1:0], rob_head, flush_rob_idx) &&
+                if (!redirect_keep_none &&
+                    u_rob.entry_valid[k] && in_range_inclusive(k[`ROB_IDX_WIDTH-1:0], rob_head, flush_rob_idx) &&
                     u_rob.entry_has_dest[k]) begin
                     if (u_rob.entry_is_float[k]) begin
                         if (!u_rob.entry_ready[k]) fp_preg_ready[u_rob.entry_new_preg[k]] <= 1'b0;
@@ -1031,8 +1080,10 @@ always @(posedge clk or negedge rst_n) begin
             out_inst_valid <= {`IF_BATCH_SIZE{1'b0}};
             out_rob_idx_0 <= {`ROB_IDX_WIDTH{1'b0}};
             out_rob_idx_valid_0 <= 1'b0;
+            out_rob_gen_0 <= {`ROB_GEN_WIDTH{1'b0}};
             out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
             out_rob_idx_valid_1 <= 1'b0;
+            out_rob_gen_1 <= {`ROB_GEN_WIDTH{1'b0}};
             out_pc_0 <= {`INST_ADDR_WIDTH{1'b0}};
             out_pc_1 <= {`INST_ADDR_WIDTH{1'b0}};
             out_pred_taken_0 <= 1'b0;
@@ -1096,6 +1147,7 @@ always @(posedge clk or negedge rst_n) begin
                 out_old_rd_preg_valid_0 <= has_dest0;
                 out_rob_idx_0 <= rob_req0 ? alloc0_rob_idx : {`ROB_IDX_WIDTH{1'b0}};
                 out_rob_idx_valid_0 <= rob_req0;
+                out_rob_gen_0 <= rob_req0 ? alloc0_rob_gen : {`ROB_GEN_WIDTH{1'b0}};
             end else begin
                 out_inst_0 <= {`INST_WIDTH{1'b0}};
                 out_pc_0 <= {`INST_ADDR_WIDTH{1'b0}};
@@ -1121,6 +1173,7 @@ always @(posedge clk or negedge rst_n) begin
                 out_old_rd_preg_valid_0 <= 1'b0;
                 out_rob_idx_0 <= {`ROB_IDX_WIDTH{1'b0}};
                 out_rob_idx_valid_0 <= 1'b0;
+                out_rob_gen_0 <= {`ROB_GEN_WIDTH{1'b0}};
             end
 
             if (in_inst_valid[1]) begin
@@ -1148,6 +1201,7 @@ always @(posedge clk or negedge rst_n) begin
                 out_old_rd_preg_valid_1 <= has_dest1;
                 out_rob_idx_1 <= rob_req1 ? alloc1_rob_idx : {`ROB_IDX_WIDTH{1'b0}};
                 out_rob_idx_valid_1 <= rob_req1;
+                out_rob_gen_1 <= rob_req1 ? alloc1_rob_gen : {`ROB_GEN_WIDTH{1'b0}};
             end else begin
                 out_inst_1 <= {`INST_WIDTH{1'b0}};
                 out_pc_1 <= {`INST_ADDR_WIDTH{1'b0}};
@@ -1173,6 +1227,7 @@ always @(posedge clk or negedge rst_n) begin
                 out_old_rd_preg_valid_1 <= 1'b0;
                 out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
                 out_rob_idx_valid_1 <= 1'b0;
+                out_rob_gen_1 <= {`ROB_GEN_WIDTH{1'b0}};
             end
             end
         end

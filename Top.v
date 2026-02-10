@@ -334,6 +334,7 @@ wire rn_rs2_is_fp_0;
 wire rn_rd_is_fp_0;
 wire [`ROB_IDX_WIDTH-1:0] rn_rob_idx_0;
 wire rn_rob_idx_valid_0;
+wire [`ROB_GEN_WIDTH-1:0] rn_rob_gen_0;
 wire [`PREG_IDX_WIDTH-1:0] rn_rs1_preg_0;
 wire rn_rs1_preg_valid_0;
 wire [`PREG_IDX_WIDTH-1:0] rn_rs2_preg_0;
@@ -353,6 +354,7 @@ wire rn_rs2_is_fp_1;
 wire rn_rd_is_fp_1;
 wire [`ROB_IDX_WIDTH-1:0] rn_rob_idx_1;
 wire rn_rob_idx_valid_1;
+wire [`ROB_GEN_WIDTH-1:0] rn_rob_gen_1;
 wire [`PREG_IDX_WIDTH-1:0] rn_rs1_preg_1;
 wire rn_rs1_preg_valid_1;
 wire [`PREG_IDX_WIDTH-1:0] rn_rs2_preg_1;
@@ -369,6 +371,9 @@ wire wb2_valid_exe;
 wire [`ROB_IDX_WIDTH-1:0] wb0_rob_idx_exe;
 wire [`ROB_IDX_WIDTH-1:0] wb1_rob_idx_exe;
 wire [`ROB_IDX_WIDTH-1:0] wb2_rob_idx_exe;
+wire [`ROB_GEN_WIDTH-1:0] wb0_rob_gen_exe;
+wire [`ROB_GEN_WIDTH-1:0] wb1_rob_gen_exe;
+wire [`ROB_GEN_WIDTH-1:0] wb2_rob_gen_exe;
 wire [`DATA_WIDTH-1:0] wb0_value_exe;
 wire [`DATA_WIDTH-1:0] wb1_value_exe;
 wire [`DATA_WIDTH-1:0] wb2_value_exe;
@@ -382,12 +387,14 @@ wire [`MEM_OP_WIDTH-1:0] lsu_mem_op;
 wire lsu_mem_is_load;
 wire lsu_mem_unsigned;
 wire [`ROB_IDX_WIDTH-1:0] lsu_rob_idx;
+wire [`ROB_GEN_WIDTH-1:0] lsu_rob_gen;
 wire [`PREG_IDX_WIDTH-1:0] lsu_rd_tag;
 wire lsu_rd_is_fp;
 wire lsu_busy;
 wire lsu_wb_valid;
 wire [`DATA_WIDTH-1:0] lsu_wb_value;
 wire [`ROB_IDX_WIDTH-1:0] lsu_wb_rob_idx;
+wire [`ROB_GEN_WIDTH-1:0] lsu_wb_rob_gen;
 wire [`PREG_IDX_WIDTH-1:0] lsu_wb_dest_tag;
 wire lsu_wb_dest_is_fp;
 wire lsu_wb_exception;
@@ -415,6 +422,7 @@ wire dq_rs2_is_fp_0;
 wire dq_rd_is_fp_0;
 wire [`ROB_IDX_WIDTH-1:0] dq_rob_idx_0;
 wire dq_rob_idx_valid_0;
+wire [`ROB_GEN_WIDTH-1:0] dq_rob_gen_0;
 wire [`PREG_IDX_WIDTH-1:0] dq_rs1_preg_0;
 wire dq_rs1_preg_valid_0;
 wire [`PREG_IDX_WIDTH-1:0] dq_rs2_preg_0;
@@ -449,6 +457,7 @@ wire dq_rs2_is_fp_1;
 wire dq_rd_is_fp_1;
 wire [`ROB_IDX_WIDTH-1:0] dq_rob_idx_1;
 wire dq_rob_idx_valid_1;
+wire [`ROB_GEN_WIDTH-1:0] dq_rob_gen_1;
 wire [`PREG_IDX_WIDTH-1:0] dq_rs1_preg_1;
 wire dq_rs1_preg_valid_1;
 wire [`PREG_IDX_WIDTH-1:0] dq_rs2_preg_1;
@@ -521,14 +530,17 @@ RegRename u_regrename (
     .in_rd_is_fp_1(pre_rd_is_fp_1),
     .wb0_valid(wb0_valid_exe),
     .wb0_rob_idx(wb0_rob_idx_exe),
+    .wb0_rob_gen(wb0_rob_gen_exe),
     .wb0_value(wb0_value_exe),
     .wb0_exception(wb0_exception_exe),
     .wb1_valid(wb1_valid_exe),
     .wb1_rob_idx(wb1_rob_idx_exe),
+    .wb1_rob_gen(wb1_rob_gen_exe),
     .wb1_value(wb1_value_exe),
     .wb1_exception(wb1_exception_exe),
     .wb2_valid(wb2_valid_exe),
     .wb2_rob_idx(wb2_rob_idx_exe),
+    .wb2_rob_gen(wb2_rob_gen_exe),
     .wb2_value(wb2_value_exe),
     .wb2_exception(wb2_exception_exe),
     .out_inst_valid(rn_valid),
@@ -554,6 +566,7 @@ RegRename u_regrename (
     .out_rd_is_fp_0(rn_rd_is_fp_0),
     .out_rob_idx_0(rn_rob_idx_0),
     .out_rob_idx_valid_0(rn_rob_idx_valid_0),
+    .out_rob_gen_0(rn_rob_gen_0),
     .out_rs1_preg_0(rn_rs1_preg_0),
     .out_rs1_preg_valid_0(rn_rs1_preg_valid_0),
     .out_rs2_preg_0(rn_rs2_preg_0),
@@ -572,6 +585,7 @@ RegRename u_regrename (
     .out_rd_is_fp_1(rn_rd_is_fp_1),
     .out_rob_idx_1(rn_rob_idx_1),
     .out_rob_idx_valid_1(rn_rob_idx_valid_1),
+    .out_rob_gen_1(rn_rob_gen_1),
     .out_rs1_preg_1(rn_rs1_preg_1),
     .out_rs1_preg_valid_1(rn_rs1_preg_valid_1),
     .out_rs2_preg_1(rn_rs2_preg_1),
@@ -638,6 +652,7 @@ wire [`INST_ADDR_WIDTH-1:0] post_pred_target_0, post_pred_target_1;
 wire [`BP_GHR_BITS-1:0] post_pred_hist_0, post_pred_hist_1;
 wire [`ROB_IDX_WIDTH-1:0] post_rob_idx_0;
 wire post_rob_idx_valid_0;
+wire [`ROB_GEN_WIDTH-1:0] post_rob_gen_0;
 wire [`PREG_IDX_WIDTH-1:0] post_rs1_preg_0;
 wire post_rs1_preg_valid_0;
 wire [`PREG_IDX_WIDTH-1:0] post_rs2_preg_0;
@@ -657,6 +672,7 @@ wire post_rs2_is_fp_1;
 wire post_rd_is_fp_1;
 wire [`ROB_IDX_WIDTH-1:0] post_rob_idx_1;
 wire post_rob_idx_valid_1;
+wire [`ROB_GEN_WIDTH-1:0] post_rob_gen_1;
 wire [`INST_ADDR_WIDTH-1:0] post_pc_0;
 wire [`INST_ADDR_WIDTH-1:0] post_pc_1;
 wire [`PREG_IDX_WIDTH-1:0] post_rs1_preg_1;
@@ -732,6 +748,7 @@ PostDecode u_postdecode (
     .in_rd_is_fp_0(rn_rd_is_fp_0),
     .in_rob_idx_0(rn_rob_idx_0),
     .in_rob_idx_valid_0(rn_rob_idx_valid_0),
+    .in_rob_gen_0(rn_rob_gen_0),
     .in_rs1_preg_0(rn_rs1_preg_0),
     .in_rs1_preg_valid_0(rn_rs1_preg_valid_0),
     .in_rs2_preg_0(rn_rs2_preg_0),
@@ -750,6 +767,7 @@ PostDecode u_postdecode (
     .in_rd_is_fp_1(rn_rd_is_fp_1),
     .in_rob_idx_1(rn_rob_idx_1),
     .in_rob_idx_valid_1(rn_rob_idx_valid_1),
+    .in_rob_gen_1(rn_rob_gen_1),
     .in_rs1_preg_1(rn_rs1_preg_1),
     .in_rs1_preg_valid_1(rn_rs1_preg_valid_1),
     .in_rs2_preg_1(rn_rs2_preg_1),
@@ -781,6 +799,7 @@ PostDecode u_postdecode (
     .out_rd_is_fp_0(post_rd_is_fp_0),
     .out_rob_idx_0(post_rob_idx_0),
     .out_rob_idx_valid_0(post_rob_idx_valid_0),
+    .out_rob_gen_0(post_rob_gen_0),
     .out_rs1_preg_0(post_rs1_preg_0),
     .out_rs1_preg_valid_0(post_rs1_preg_valid_0),
     .out_rs2_preg_0(post_rs2_preg_0),
@@ -799,6 +818,7 @@ PostDecode u_postdecode (
     .out_rd_is_fp_1(post_rd_is_fp_1),
     .out_rob_idx_1(post_rob_idx_1),
     .out_rob_idx_valid_1(post_rob_idx_valid_1),
+    .out_rob_gen_1(post_rob_gen_1),
     .out_rs1_preg_1(post_rs1_preg_1),
     .out_rs1_preg_valid_1(post_rs1_preg_valid_1),
     .out_rs2_preg_1(post_rs2_preg_1),
@@ -870,6 +890,7 @@ DispatchQueue #(.DEPTH(8)) u_dispatchq (
     .in_rd_is_fp_0(post_rd_is_fp_0),
     .in_rob_idx_0(post_rob_idx_0),
     .in_rob_idx_valid_0(post_rob_idx_valid_0),
+    .in_rob_gen_0(post_rob_gen_0),
     .in_rs1_preg_0(post_rs1_preg_0),
     .in_rs1_preg_valid_0(post_rs1_preg_valid_0),
     .in_rs2_preg_0(post_rs2_preg_0),
@@ -904,6 +925,7 @@ DispatchQueue #(.DEPTH(8)) u_dispatchq (
     .in_rd_is_fp_1(post_rd_is_fp_1),
     .in_rob_idx_1(post_rob_idx_1),
     .in_rob_idx_valid_1(post_rob_idx_valid_1),
+    .in_rob_gen_1(post_rob_gen_1),
     .in_rs1_preg_1(post_rs1_preg_1),
     .in_rs1_preg_valid_1(post_rs1_preg_valid_1),
     .in_rs2_preg_1(post_rs2_preg_1),
@@ -950,6 +972,7 @@ DispatchQueue #(.DEPTH(8)) u_dispatchq (
     .out_rd_is_fp_0(dq_rd_is_fp_0),
     .out_rob_idx_0(dq_rob_idx_0),
     .out_rob_idx_valid_0(dq_rob_idx_valid_0),
+    .out_rob_gen_0(dq_rob_gen_0),
     .out_rs1_preg_0(dq_rs1_preg_0),
     .out_rs1_preg_valid_0(dq_rs1_preg_valid_0),
     .out_rs2_preg_0(dq_rs2_preg_0),
@@ -984,6 +1007,7 @@ DispatchQueue #(.DEPTH(8)) u_dispatchq (
     .out_rd_is_fp_1(dq_rd_is_fp_1),
     .out_rob_idx_1(dq_rob_idx_1),
     .out_rob_idx_valid_1(dq_rob_idx_valid_1),
+    .out_rob_gen_1(dq_rob_gen_1),
     .out_rs1_preg_1(dq_rs1_preg_1),
     .out_rs1_preg_valid_1(dq_rs1_preg_valid_1),
     .out_rs2_preg_1(dq_rs2_preg_1),
@@ -1081,6 +1105,7 @@ IssueBuffer u_issue (
     .in_rd_is_fp_0(dq_rd_is_fp_0),
     .in_rob_idx_0(dq_rob_idx_0),
     .in_rob_idx_valid_0(dq_rob_idx_valid_0),
+    .in_rob_gen_0(dq_rob_gen_0),
     .in_rs1_preg_0(dq_rs1_preg_0),
     .in_rs1_preg_valid_0(dq_rs1_preg_valid_0),
     .in_rs1_ready_now_0(dq_rs1_ready_now_0),
@@ -1117,6 +1142,7 @@ IssueBuffer u_issue (
     .in_rd_is_fp_1(dq_rd_is_fp_1),
     .in_rob_idx_1(dq_rob_idx_1),
     .in_rob_idx_valid_1(dq_rob_idx_valid_1),
+    .in_rob_gen_1(dq_rob_gen_1),
     .in_rs1_preg_1(dq_rs1_preg_1),
     .in_rs1_preg_valid_1(dq_rs1_preg_valid_1),
     .in_rs1_ready_now_1(dq_rs1_ready_now_1),
@@ -1147,14 +1173,17 @@ IssueBuffer u_issue (
     .stall_dispatch(issue_stall),
     .wb0_valid(wb0_valid_exe),
     .wb0_rob_idx(wb0_rob_idx_exe),
+    .wb0_rob_gen(wb0_rob_gen_exe),
     .wb0_value(wb0_value_exe),
     .wb0_exception(wb0_exception_exe),
     .wb1_valid(wb1_valid_exe),
     .wb1_rob_idx(wb1_rob_idx_exe),
+    .wb1_rob_gen(wb1_rob_gen_exe),
     .wb1_value(wb1_value_exe),
     .wb1_exception(wb1_exception_exe),
     .wb2_valid(wb2_valid_exe),
     .wb2_rob_idx(wb2_rob_idx_exe),
+    .wb2_rob_gen(wb2_rob_gen_exe),
     .wb2_value(wb2_value_exe),
     .wb2_exception(wb2_exception_exe),
     .lsu_valid(lsu_valid),
@@ -1164,12 +1193,14 @@ IssueBuffer u_issue (
     .lsu_mem_is_load(lsu_mem_is_load),
     .lsu_mem_unsigned(lsu_mem_unsigned),
     .lsu_rob_idx(lsu_rob_idx),
+    .lsu_rob_gen(lsu_rob_gen),
     .lsu_rd_tag(lsu_rd_tag),
     .lsu_rd_is_fp(lsu_rd_is_fp),
     .lsu_busy(lsu_busy),
     .lsu_wb_valid(lsu_wb_valid),
     .lsu_wb_value(lsu_wb_value),
     .lsu_wb_rob_idx(lsu_wb_rob_idx),
+    .lsu_wb_rob_gen(lsu_wb_rob_gen),
     .lsu_wb_dest_tag(lsu_wb_dest_tag),
     .lsu_wb_dest_is_fp(lsu_wb_dest_is_fp),
     .lsu_wb_exception(lsu_wb_exception),
@@ -1226,12 +1257,14 @@ LSU u_lsu (
     .mem_is_load(lsu_mem_is_load),
     .mem_unsigned(lsu_mem_unsigned),
     .rob_idx_in(lsu_rob_idx),
+    .rob_gen_in(lsu_rob_gen),
     .rd_tag_in(lsu_rd_tag),
     .rd_is_fp_in(lsu_rd_is_fp),
     .busy(lsu_busy),
     .wb_valid(lsu_wb_valid),
     .wb_value(lsu_wb_value),
     .wb_rob_idx(lsu_wb_rob_idx),
+    .wb_rob_gen(lsu_wb_rob_gen),
     .wb_dest_tag(lsu_wb_dest_tag),
     .wb_dest_is_fp(lsu_wb_dest_is_fp),
     .wb_exception(lsu_wb_exception),
@@ -1274,6 +1307,7 @@ module DispatchQueue #(
     input  wire                        in_rd_is_fp_0,
     input  wire [`ROB_IDX_WIDTH-1:0]   in_rob_idx_0,
     input  wire                        in_rob_idx_valid_0,
+    input  wire [`ROB_GEN_WIDTH-1:0]   in_rob_gen_0,
     input  wire [`PREG_IDX_WIDTH-1:0]  in_rs1_preg_0,
     input  wire                        in_rs1_preg_valid_0,
     input  wire [`PREG_IDX_WIDTH-1:0]  in_rs2_preg_0,
@@ -1308,6 +1342,7 @@ module DispatchQueue #(
     input  wire                        in_rd_is_fp_1,
     input  wire [`ROB_IDX_WIDTH-1:0]   in_rob_idx_1,
     input  wire                        in_rob_idx_valid_1,
+    input  wire [`ROB_GEN_WIDTH-1:0]   in_rob_gen_1,
     input  wire [`PREG_IDX_WIDTH-1:0]  in_rs1_preg_1,
     input  wire                        in_rs1_preg_valid_1,
     input  wire [`PREG_IDX_WIDTH-1:0]  in_rs2_preg_1,
@@ -1356,6 +1391,7 @@ module DispatchQueue #(
     output wire                        out_rd_is_fp_0,
     output wire [`ROB_IDX_WIDTH-1:0]   out_rob_idx_0,
     output wire                        out_rob_idx_valid_0,
+    output wire [`ROB_GEN_WIDTH-1:0]   out_rob_gen_0,
     output wire [`PREG_IDX_WIDTH-1:0]  out_rs1_preg_0,
     output wire                        out_rs1_preg_valid_0,
     output wire [`PREG_IDX_WIDTH-1:0]  out_rs2_preg_0,
@@ -1390,6 +1426,7 @@ module DispatchQueue #(
     output wire                        out_rd_is_fp_1,
     output wire [`ROB_IDX_WIDTH-1:0]   out_rob_idx_1,
     output wire                        out_rob_idx_valid_1,
+    output wire [`ROB_GEN_WIDTH-1:0]   out_rob_gen_1,
     output wire [`PREG_IDX_WIDTH-1:0]  out_rs1_preg_1,
     output wire                        out_rs1_preg_valid_1,
     output wire [`PREG_IDX_WIDTH-1:0]  out_rs2_preg_1,
@@ -1440,6 +1477,7 @@ module DispatchQueue #(
     reg                        q_rd_is_fp_0       [0:DEPTH-1];
     reg [`ROB_IDX_WIDTH-1:0]   q_rob_idx_0        [0:DEPTH-1];
     reg                        q_rob_idx_valid_0  [0:DEPTH-1];
+    reg [`ROB_GEN_WIDTH-1:0]   q_rob_gen_0        [0:DEPTH-1];
     reg [`PREG_IDX_WIDTH-1:0]  q_rs1_preg_0       [0:DEPTH-1];
     reg                        q_rs1_preg_valid_0 [0:DEPTH-1];
     reg [`PREG_IDX_WIDTH-1:0]  q_rs2_preg_0       [0:DEPTH-1];
@@ -1474,6 +1512,7 @@ module DispatchQueue #(
     reg                        q_rd_is_fp_1       [0:DEPTH-1];
     reg [`ROB_IDX_WIDTH-1:0]   q_rob_idx_1        [0:DEPTH-1];
     reg                        q_rob_idx_valid_1  [0:DEPTH-1];
+    reg [`ROB_GEN_WIDTH-1:0]   q_rob_gen_1        [0:DEPTH-1];
     reg [`PREG_IDX_WIDTH-1:0]  q_rs1_preg_1       [0:DEPTH-1];
     reg                        q_rs1_preg_valid_1 [0:DEPTH-1];
     reg [`PREG_IDX_WIDTH-1:0]  q_rs2_preg_1       [0:DEPTH-1];
@@ -1537,6 +1576,7 @@ module DispatchQueue #(
     assign out_rd_is_fp_0 = (count != 0) ? q_rd_is_fp_0[head] : 1'b0;
     assign out_rob_idx_0 = (count != 0) ? q_rob_idx_0[head] : {`ROB_IDX_WIDTH{1'b0}};
     assign out_rob_idx_valid_0 = (count != 0) ? q_rob_idx_valid_0[head] : 1'b0;
+    assign out_rob_gen_0 = (count != 0) ? q_rob_gen_0[head] : {`ROB_GEN_WIDTH{1'b0}};
     assign out_rs1_preg_0 = (count != 0) ? q_rs1_preg_0[head] : {`PREG_IDX_WIDTH{1'b0}};
     assign out_rs1_preg_valid_0 = (count != 0) ? q_rs1_preg_valid_0[head] : 1'b0;
     assign out_rs2_preg_0 = (count != 0) ? q_rs2_preg_0[head] : {`PREG_IDX_WIDTH{1'b0}};
@@ -1571,6 +1611,7 @@ module DispatchQueue #(
     assign out_rd_is_fp_1 = (count != 0) ? q_rd_is_fp_1[head] : 1'b0;
     assign out_rob_idx_1 = (count != 0) ? q_rob_idx_1[head] : {`ROB_IDX_WIDTH{1'b0}};
     assign out_rob_idx_valid_1 = (count != 0) ? q_rob_idx_valid_1[head] : 1'b0;
+    assign out_rob_gen_1 = (count != 0) ? q_rob_gen_1[head] : {`ROB_GEN_WIDTH{1'b0}};
     assign out_rs1_preg_1 = (count != 0) ? q_rs1_preg_1[head] : {`PREG_IDX_WIDTH{1'b0}};
     assign out_rs1_preg_valid_1 = (count != 0) ? q_rs1_preg_valid_1[head] : 1'b0;
     assign out_rs2_preg_1 = (count != 0) ? q_rs2_preg_1[head] : {`PREG_IDX_WIDTH{1'b0}};
@@ -1628,6 +1669,7 @@ module DispatchQueue #(
                 q_rd_is_fp_0[tail]       <= in_rd_is_fp_0;
                 q_rob_idx_0[tail]        <= in_rob_idx_0;
                 q_rob_idx_valid_0[tail]  <= in_rob_idx_valid_0;
+                q_rob_gen_0[tail]        <= in_rob_gen_0;
                 q_rs1_preg_0[tail]       <= in_rs1_preg_0;
                 q_rs1_preg_valid_0[tail] <= in_rs1_preg_valid_0;
                 q_rs2_preg_0[tail]       <= in_rs2_preg_0;
@@ -1662,6 +1704,7 @@ module DispatchQueue #(
                 q_rd_is_fp_1[tail]       <= in_rd_is_fp_1;
                 q_rob_idx_1[tail]        <= in_rob_idx_1;
                 q_rob_idx_valid_1[tail]  <= in_rob_idx_valid_1;
+                q_rob_gen_1[tail]        <= in_rob_gen_1;
                 q_rs1_preg_1[tail]       <= in_rs1_preg_1;
                 q_rs1_preg_valid_1[tail] <= in_rs1_preg_valid_1;
                 q_rs2_preg_1[tail]       <= in_rs2_preg_1;

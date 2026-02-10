@@ -33,6 +33,7 @@ module IssueBuffer #(
     input  wire                         in_rd_is_fp_0,
     input  wire [`ROB_IDX_WIDTH-1:0]    in_rob_idx_0,
     input  wire                         in_rob_idx_valid_0,
+    input  wire [`ROB_GEN_WIDTH-1:0]    in_rob_gen_0,
     input  wire [`PREG_IDX_WIDTH-1:0]   in_rs1_preg_0,
     input  wire                         in_rs1_preg_valid_0,
     input  wire                         in_rs1_ready_now_0,
@@ -70,6 +71,7 @@ module IssueBuffer #(
     input  wire                         in_rd_is_fp_1,
     input  wire [`ROB_IDX_WIDTH-1:0]    in_rob_idx_1,
     input  wire                         in_rob_idx_valid_1,
+    input  wire [`ROB_GEN_WIDTH-1:0]    in_rob_gen_1,
     input  wire [`PREG_IDX_WIDTH-1:0]   in_rs1_preg_1,
     input  wire                         in_rs1_preg_valid_1,
     input  wire                         in_rs1_ready_now_1,
@@ -106,14 +108,17 @@ module IssueBuffer #(
     // Writeback outputs to ROB/PRF
     output reg                          wb0_valid,
     output reg  [`ROB_IDX_WIDTH-1:0]    wb0_rob_idx,
+    output reg  [`ROB_GEN_WIDTH-1:0]    wb0_rob_gen,
     output reg  [`DATA_WIDTH-1:0]       wb0_value,
     output reg                          wb0_exception,
     output reg                          wb1_valid,
     output reg  [`ROB_IDX_WIDTH-1:0]    wb1_rob_idx,
+    output reg  [`ROB_GEN_WIDTH-1:0]    wb1_rob_gen,
     output reg  [`DATA_WIDTH-1:0]       wb1_value,
     output reg                          wb1_exception,
     output reg                          wb2_valid,
     output reg  [`ROB_IDX_WIDTH-1:0]    wb2_rob_idx,
+    output reg  [`ROB_GEN_WIDTH-1:0]    wb2_rob_gen,
     output reg  [`DATA_WIDTH-1:0]       wb2_value,
     output reg                          wb2_exception,
 
@@ -125,12 +130,14 @@ module IssueBuffer #(
     output reg                          lsu_mem_is_load,
     output reg                          lsu_mem_unsigned,
     output reg  [`ROB_IDX_WIDTH-1:0]    lsu_rob_idx,
+    output reg  [`ROB_GEN_WIDTH-1:0]    lsu_rob_gen,
     output reg  [`PREG_IDX_WIDTH-1:0]   lsu_rd_tag,
     output reg                          lsu_rd_is_fp,
     input  wire                         lsu_busy,
     input  wire                         lsu_wb_valid,
     input  wire [`DATA_WIDTH-1:0]       lsu_wb_value,
     input  wire [`ROB_IDX_WIDTH-1:0]    lsu_wb_rob_idx,
+    input  wire [`ROB_GEN_WIDTH-1:0]    lsu_wb_rob_gen,
     input  wire [`PREG_IDX_WIDTH-1:0]   lsu_wb_dest_tag,
     input  wire                         lsu_wb_dest_is_fp,
     input  wire                         lsu_wb_exception,
@@ -215,6 +222,7 @@ module IssueBuffer #(
     reg [`PREG_IDX_WIDTH-1:0]  rs_rd_tag     [0:RS_DEPTH-1];
     reg                        rs_rd_is_fp   [0:RS_DEPTH-1];
     reg [`ROB_IDX_WIDTH-1:0]   rs_rob_idx    [0:RS_DEPTH-1];
+    reg [`ROB_GEN_WIDTH-1:0]   rs_rob_gen    [0:RS_DEPTH-1];
     reg                        rs_pred_taken [0:RS_DEPTH-1];
     reg [`INST_ADDR_WIDTH-1:0] rs_pred_target[0:RS_DEPTH-1];
     reg [`BP_GHR_BITS-1:0]     rs_pred_hist  [0:RS_DEPTH-1];
@@ -367,6 +375,7 @@ module IssueBuffer #(
     wire [`DATA_WIDTH-1:0] cand0_val = select_result(rs_fu_sel[issue_idx0], alu_res_0, mul_res0, fpu_res0, rs_muldiv_op[issue_idx0], csr_old0, link0);
     wire [`PREG_IDX_WIDTH-1:0] cand0_tag = rs_rd_tag[issue_idx0];
     wire [`ROB_IDX_WIDTH-1:0]  cand0_rob = rs_rob_idx[issue_idx0];
+    wire [`ROB_GEN_WIDTH-1:0]  cand0_rob_gen = rs_rob_gen[issue_idx0];
     wire cand0_is_fp = rs_rd_is_fp[issue_idx0];
     wire cand0_exc   = rs_illegal[issue_idx0];
 
@@ -377,6 +386,7 @@ module IssueBuffer #(
     wire [`DATA_WIDTH-1:0] cand1_val = select_result(rs_fu_sel[issue_idx1], alu_res_1, mul_res1, fpu_res1, rs_muldiv_op[issue_idx1], csr_old1, link1);
     wire [`PREG_IDX_WIDTH-1:0] cand1_tag = rs_rd_tag[issue_idx1];
     wire [`ROB_IDX_WIDTH-1:0]  cand1_rob = rs_rob_idx[issue_idx1];
+    wire [`ROB_GEN_WIDTH-1:0]  cand1_rob_gen = rs_rob_gen[issue_idx1];
     wire cand1_is_fp = rs_rd_is_fp[issue_idx1];
     wire cand1_exc   = rs_illegal[issue_idx1];
 
@@ -384,6 +394,7 @@ module IssueBuffer #(
     reg wb0_dest_valid, wb1_dest_valid, div_dest_valid;
     reg wb0_dest_is_fp, wb1_dest_is_fp, div_dest_is_fp;
     reg [`ROB_IDX_WIDTH-1:0] div_rob_idx;
+    reg [`ROB_GEN_WIDTH-1:0] div_rob_gen;
     reg                      div_exception;
     reg                      div_busy;
     reg [3:0]                div_counter;
@@ -395,6 +406,7 @@ module IssueBuffer #(
     wire [`DATA_WIDTH-1:0] cand2_val = div_value;
     wire [`PREG_IDX_WIDTH-1:0] cand2_tag = div_dest_tag;
     wire [`ROB_IDX_WIDTH-1:0]  cand2_rob = div_rob_idx;
+    wire [`ROB_GEN_WIDTH-1:0]  cand2_rob_gen = div_rob_gen;
     wire cand2_is_fp = div_dest_is_fp;
     wire cand2_exc   = div_exception;
 
@@ -403,6 +415,7 @@ module IssueBuffer #(
     wire [`DATA_WIDTH-1:0]    cand3_val = lsu_wb_value;
     wire [`PREG_IDX_WIDTH-1:0] cand3_tag = lsu_wb_dest_tag;
     wire [`ROB_IDX_WIDTH-1:0]  cand3_rob = lsu_wb_rob_idx;
+    wire [`ROB_GEN_WIDTH-1:0]  cand3_rob_gen = lsu_wb_rob_gen;
     wire cand3_is_fp = lsu_wb_dest_is_fp;
     wire cand3_exc   = lsu_wb_exception;
     wire lsu_nodest_valid = lsu_wb_valid && !cand3_has_dest;
@@ -420,6 +433,12 @@ module IssueBuffer #(
     reg     lsu_pending;
     reg     lsu_can_issue;
     wire allow_issue1 = !lsu_wb_valid;
+    wire [`ROB_IDX_WIDTH-1:0] flush_rob_idx_next =
+        (flush_rob_idx == (`ROB_SIZE-1)) ? {`ROB_IDX_WIDTH{1'b0}} : (flush_rob_idx + 1'b1);
+    // Redirect flush is applied one cycle after redirect detection.
+    // If the branch committed in-between, rob_head has already moved past flush_rob_idx.
+    // In that case, no in-flight older/equal uops remain and we must not use wrapped ranges.
+    wire redirect_keep_none = flush_is_redirect && (rob_head == flush_rob_idx_next);
 
     function in_range_inclusive;
         input [`ROB_IDX_WIDTH-1:0] idx;
@@ -571,6 +590,8 @@ module IssueBuffer #(
         wb0_valid = 1'b0; wb1_valid = 1'b0; wb2_valid = 1'b0;
         wb0_rob_idx = {`ROB_IDX_WIDTH{1'b0}}; wb1_rob_idx = {`ROB_IDX_WIDTH{1'b0}};
         wb2_rob_idx = {`ROB_IDX_WIDTH{1'b0}};
+        wb0_rob_gen = {`ROB_GEN_WIDTH{1'b0}}; wb1_rob_gen = {`ROB_GEN_WIDTH{1'b0}};
+        wb2_rob_gen = {`ROB_GEN_WIDTH{1'b0}};
         wb0_value = {`DATA_WIDTH{1'b0}}; wb1_value = {`DATA_WIDTH{1'b0}}; wb2_value = {`DATA_WIDTH{1'b0}};
         wb0_exception = 1'b0; wb1_exception = 1'b0; wb2_exception = 1'b0;
         wb0_dest_tag = {`PREG_IDX_WIDTH{1'b0}}; wb1_dest_tag = {`PREG_IDX_WIDTH{1'b0}}; div_dest_tag = {`PREG_IDX_WIDTH{1'b0}};
@@ -585,12 +606,14 @@ module IssueBuffer #(
             wb2_valid     = 1'b1;
             wb2_value     = lsu_wb_value;
             wb2_rob_idx   = lsu_wb_rob_idx;
+            wb2_rob_gen   = lsu_wb_rob_gen;
             wb2_exception = lsu_wb_exception;
         end
         if (cand3_valid && pick < 2) begin
             wb0_valid     = 1'b1;
             wb0_value     = cand3_val;
             wb0_rob_idx   = cand3_rob;
+            wb0_rob_gen   = cand3_rob_gen;
             wb0_exception = cand3_exc;
             wb0_dest_tag  = cand3_tag;
             wb0_dest_valid= cand3_has_dest;
@@ -607,6 +630,7 @@ module IssueBuffer #(
                 wb0_valid     = 1'b1;
                 wb0_value     = cand0_val;
                 wb0_rob_idx   = cand0_rob;
+                wb0_rob_gen   = cand0_rob_gen;
                 wb0_exception = cand0_exc;
                 wb0_dest_tag  = cand0_tag;
                 wb0_dest_valid= cand0_has_dest;
@@ -620,6 +644,7 @@ module IssueBuffer #(
                 wb1_valid     = 1'b1;
                 wb1_value     = cand0_val;
                 wb1_rob_idx   = cand0_rob;
+                wb1_rob_gen   = cand0_rob_gen;
                 wb1_exception = cand0_exc;
                 wb1_dest_tag  = cand0_tag;
                 wb1_dest_valid= cand0_has_dest;
@@ -637,6 +662,7 @@ module IssueBuffer #(
                 wb0_valid     = 1'b1;
                 wb0_value     = cand1_val;
                 wb0_rob_idx   = cand1_rob;
+                wb0_rob_gen   = cand1_rob_gen;
                 wb0_exception = cand1_exc;
                 wb0_dest_tag  = cand1_tag;
                 wb0_dest_valid= cand1_has_dest;
@@ -650,6 +676,7 @@ module IssueBuffer #(
                 wb1_valid     = 1'b1;
                 wb1_value     = cand1_val;
                 wb1_rob_idx   = cand1_rob;
+                wb1_rob_gen   = cand1_rob_gen;
                 wb1_exception = cand1_exc;
                 wb1_dest_tag  = cand1_tag;
                 wb1_dest_valid= cand1_has_dest;
@@ -667,6 +694,7 @@ module IssueBuffer #(
                 wb0_valid     = 1'b1;
                 wb0_value     = cand2_val;
                 wb0_rob_idx   = cand2_rob;
+                wb0_rob_gen   = cand2_rob_gen;
                 wb0_exception = cand2_exc;
                 wb0_dest_tag  = cand2_tag;
                 wb0_dest_valid= 1'b1;
@@ -678,6 +706,7 @@ module IssueBuffer #(
                 wb1_valid     = 1'b1;
                 wb1_value     = cand2_val;
                 wb1_rob_idx   = cand2_rob;
+                wb1_rob_gen   = cand2_rob_gen;
                 wb1_exception = cand2_exc;
                 wb1_dest_tag  = cand2_tag;
                 wb1_dest_valid= 1'b1;
@@ -708,6 +737,9 @@ module IssueBuffer #(
             i_wr_we0 <= 1'b0; i_wr_we1 <= 1'b0; f_wr_we0 <= 1'b0; f_wr_we1 <= 1'b0;
             wb0_valid <= 1'b0; wb1_valid <= 1'b0; wb2_valid <= 1'b0;
             wb0_exception <= 1'b0; wb1_exception <= 1'b0;
+            wb0_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
+            wb1_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
+            wb2_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
             lsu_valid <= 1'b0;
             lsu_pending <= 1'b0;
             lsu_addr <= 32'b0;
@@ -716,8 +748,19 @@ module IssueBuffer #(
             lsu_mem_is_load <= 1'b0;
             lsu_mem_unsigned <= 1'b0;
             lsu_rob_idx <= {`ROB_IDX_WIDTH{1'b0}};
+            lsu_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
             lsu_rd_tag <= {`PREG_IDX_WIDTH{1'b0}};
             lsu_rd_is_fp <= 1'b0;
+            div_busy <= 1'b0;
+            div_done <= 1'b0;
+            div_counter <= 4'b0;
+            div_dest_tag <= {`PREG_IDX_WIDTH{1'b0}};
+            div_dest_valid <= 1'b0;
+            div_dest_is_fp <= 1'b0;
+            div_rob_idx <= {`ROB_IDX_WIDTH{1'b0}};
+            div_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
+            div_exception <= 1'b0;
+            div_value <= {`DATA_WIDTH{1'b0}};
             redirect_valid <= 1'b0;
             redirect_target <= {`INST_ADDR_WIDTH{1'b0}};
             redirect_rob_idx <= {`ROB_IDX_WIDTH{1'b0}};
@@ -732,8 +775,12 @@ module IssueBuffer #(
             i_wr_we0 <= 1'b0; i_wr_we1 <= 1'b0; f_wr_we0 <= 1'b0; f_wr_we1 <= 1'b0;
             wb0_valid <= 1'b0; wb1_valid <= 1'b0; wb2_valid <= 1'b0;
             wb0_exception <= 1'b0; wb1_exception <= 1'b0;
+            wb0_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
+            wb1_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
+            wb2_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
             lsu_valid <= 1'b0;
             lsu_pending <= 1'b0;
+            lsu_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
             redirect_valid <= 1'b0;
             redirect_target <= {`INST_ADDR_WIDTH{1'b0}};
             redirect_rob_idx <= {`ROB_IDX_WIDTH{1'b0}};
@@ -744,7 +791,7 @@ module IssueBuffer #(
             bp_update0_hist <= {`BP_GHR_BITS{1'b0}}; bp_update1_hist <= {`BP_GHR_BITS{1'b0}};
             bp_update0_is_call <= 1'b0; bp_update1_is_call <= 1'b0;
             bp_update0_is_return <= 1'b0; bp_update1_is_return <= 1'b0;
-            if (flush_is_redirect) begin
+            if (flush_is_redirect && !redirect_keep_none) begin
                 new_count = 0;
                 for (i_idx = 0; i_idx < RS_DEPTH; i_idx = i_idx + 1) begin
                     if (rs_valid[i_idx] && in_range_inclusive(rs_rob_idx[i_idx], rob_head, flush_rob_idx)) begin
@@ -833,6 +880,7 @@ module IssueBuffer #(
                 lsu_mem_is_load <= rs_mem_is_load[mem_issue_idx];
                 lsu_mem_unsigned <= rs_mem_unsigned[mem_issue_idx];
                 lsu_rob_idx <= rs_rob_idx[mem_issue_idx];
+                lsu_rob_gen <= rs_rob_gen[mem_issue_idx];
                 lsu_rd_tag <= rs_rd_tag[mem_issue_idx];
                 lsu_rd_is_fp <= rs_rd_is_fp[mem_issue_idx];
             end
@@ -856,6 +904,7 @@ module IssueBuffer #(
                     div_dest_valid <= (rs_rd_tag[issue_idx0] != {`PREG_IDX_WIDTH{1'b0}});
                     div_dest_is_fp <= rs_rd_is_fp[issue_idx0];
                     div_rob_idx <= rs_rob_idx[issue_idx0];
+                    div_rob_gen <= rs_rob_gen[issue_idx0];
                     div_exception <= rs_illegal[issue_idx0];
                     // Simple signed/unsigned division/remainder
                     if (rs_div_is_rem[issue_idx0]) begin
@@ -891,6 +940,7 @@ module IssueBuffer #(
                     div_dest_valid <= (rs_rd_tag[issue_idx1] != {`PREG_IDX_WIDTH{1'b0}});
                     div_dest_is_fp <= rs_rd_is_fp[issue_idx1];
                     div_rob_idx <= rs_rob_idx[issue_idx1];
+                    div_rob_gen <= rs_rob_gen[issue_idx1];
                     div_exception <= rs_illegal[issue_idx1];
                     if (rs_div_is_rem[issue_idx1]) begin
                         if (rs_rs2_val[issue_idx1]==0) div_value <= rs_rs1_val[issue_idx1];
@@ -1006,6 +1056,7 @@ module IssueBuffer #(
                     rs_rd_tag[found_idx0]     <= in_rd_preg_0;
                     rs_rd_is_fp[found_idx0]   <= in_rd_is_fp_0;
                     rs_rob_idx[found_idx0]    <= in_rob_idx_0;
+                    rs_rob_gen[found_idx0]    <= in_rob_gen_0;
                     enq_cnt = enq_cnt + 1;
                     age_counter <= age_counter + 1'b1;
                 end
@@ -1056,6 +1107,7 @@ module IssueBuffer #(
                     rs_rd_tag[found_idx1]     <= in_rd_preg_1;
                     rs_rd_is_fp[found_idx1]   <= in_rd_is_fp_1;
                     rs_rob_idx[found_idx1]    <= in_rob_idx_1;
+                    rs_rob_gen[found_idx1]    <= in_rob_gen_1;
                     enq_cnt = enq_cnt + 1;
                     age_counter <= age_counter + 1'b1;
                 end

@@ -124,6 +124,7 @@
 // ROB parameters
 `define ROB_SIZE      32
 `define ROB_IDX_WIDTH 5   // log2(ROB_SIZE)
+`define ROB_GEN_WIDTH 2   // per-slot generation tag width for stale WB filtering
 
 // Physical register file parameters (can exceed architectural count)
 `define INT_PREG_NUM   64

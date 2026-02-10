@@ -31,6 +31,7 @@ module PostDecode (
     input  wire                        in_rd_is_fp_0,
     input  wire [`ROB_IDX_WIDTH-1:0]   in_rob_idx_0,
     input  wire                        in_rob_idx_valid_0,
+    input  wire [`ROB_GEN_WIDTH-1:0]   in_rob_gen_0,
     input  wire [`PREG_IDX_WIDTH-1:0]  in_rs1_preg_0,
     input  wire                        in_rs1_preg_valid_0,
     input  wire [`PREG_IDX_WIDTH-1:0]  in_rs2_preg_0,
@@ -51,6 +52,7 @@ module PostDecode (
     input  wire                        in_rd_is_fp_1,
     input  wire [`ROB_IDX_WIDTH-1:0]   in_rob_idx_1,
     input  wire                        in_rob_idx_valid_1,
+    input  wire [`ROB_GEN_WIDTH-1:0]   in_rob_gen_1,
     input  wire [`PREG_IDX_WIDTH-1:0]  in_rs1_preg_1,
     input  wire                        in_rs1_preg_valid_1,
     input  wire [`PREG_IDX_WIDTH-1:0]  in_rs2_preg_1,
@@ -80,6 +82,7 @@ module PostDecode (
     output reg                         out_rd_is_fp_0,
     output reg  [`ROB_IDX_WIDTH-1:0]   out_rob_idx_0,
     output reg                         out_rob_idx_valid_0,
+    output reg  [`ROB_GEN_WIDTH-1:0]   out_rob_gen_0,
     output reg  [`PREG_IDX_WIDTH-1:0]  out_rs1_preg_0,
     output reg                         out_rs1_preg_valid_0,
     output reg  [`PREG_IDX_WIDTH-1:0]  out_rs2_preg_0,
@@ -103,6 +106,7 @@ module PostDecode (
     output reg [`BP_GHR_BITS-1:0]      out_pred_hist_1,
     output reg  [`ROB_IDX_WIDTH-1:0]   out_rob_idx_1,
     output reg                         out_rob_idx_valid_1,
+    output reg  [`ROB_GEN_WIDTH-1:0]   out_rob_gen_1,
     output reg  [`PREG_IDX_WIDTH-1:0]  out_rs1_preg_1,
     output reg                         out_rs1_preg_valid_1,
     output reg  [`PREG_IDX_WIDTH-1:0]  out_rs2_preg_1,
@@ -473,6 +477,7 @@ always @(posedge clk or negedge rst_n) begin
         out_rd_is_fp_0  <= 1'b0;
         out_rob_idx_0 <= {`ROB_IDX_WIDTH{1'b0}};
         out_rob_idx_valid_0 <= 1'b0;
+        out_rob_gen_0 <= {`ROB_GEN_WIDTH{1'b0}};
         out_rs1_preg_0 <= {`PREG_IDX_WIDTH{1'b0}};
         out_rs1_preg_valid_0 <= 1'b0;
         out_rs2_preg_0 <= {`PREG_IDX_WIDTH{1'b0}};
@@ -495,6 +500,7 @@ always @(posedge clk or negedge rst_n) begin
         out_pred_hist_1 <= {`BP_GHR_BITS{1'b0}};
         out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
         out_rob_idx_valid_1 <= 1'b0;
+        out_rob_gen_1 <= {`ROB_GEN_WIDTH{1'b0}};
         out_rs1_preg_1 <= {`PREG_IDX_WIDTH{1'b0}};
         out_rs1_preg_valid_1 <= 1'b0;
         out_rs2_preg_1 <= {`PREG_IDX_WIDTH{1'b0}};
@@ -568,6 +574,7 @@ always @(posedge clk or negedge rst_n) begin
             out_old_rd_preg_valid_0 <= in_old_rd_preg_valid_0;
             out_rob_idx_0 <= in_rob_idx_0;
             out_rob_idx_valid_0 <= in_rob_idx_valid_0;
+            out_rob_gen_0 <= in_rob_gen_0;
 
             out_fu_sel_0 <= fu_dec_0;
             out_int_op_0 <= int_op_dec_0;
@@ -612,6 +619,7 @@ always @(posedge clk or negedge rst_n) begin
             out_old_rd_preg_valid_0 <= 1'b0;
             out_rob_idx_0 <= {`ROB_IDX_WIDTH{1'b0}};
             out_rob_idx_valid_0 <= 1'b0;
+            out_rob_gen_0 <= {`ROB_GEN_WIDTH{1'b0}};
 
             out_fu_sel_0 <= `FU_DEC_DUMMY;
             out_int_op_0 <= {`ALU_OP_WIDTH{1'b0}};
@@ -658,6 +666,7 @@ always @(posedge clk or negedge rst_n) begin
             out_old_rd_preg_valid_1 <= in_old_rd_preg_valid_1;
             out_rob_idx_1 <= in_rob_idx_1;
             out_rob_idx_valid_1 <= in_rob_idx_valid_1;
+            out_rob_gen_1 <= in_rob_gen_1;
 
             out_fu_sel_1 <= fu_dec_1;
             out_int_op_1 <= int_op_dec_1;
@@ -702,6 +711,7 @@ always @(posedge clk or negedge rst_n) begin
             out_old_rd_preg_valid_1 <= 1'b0;
             out_rob_idx_1 <= {`ROB_IDX_WIDTH{1'b0}};
             out_rob_idx_valid_1 <= 1'b0;
+            out_rob_gen_1 <= {`ROB_GEN_WIDTH{1'b0}};
 
             out_fu_sel_1 <= `FU_DEC_DUMMY;
             out_int_op_1 <= {`ALU_OP_WIDTH{1'b0}};

@@ -5,7 +5,8 @@ This document summarizes the current two-wide OoO core as wired today (including
 ## Quick Snapshot
 - Pipeline: IF → InstructionBuffer → PreDecode → RegRename/ROB → PostDecode → DispatchQueue → Issue/Execute → Commit.
 - Width: 2-wide fetch/rename/issue/commit; shared int/fp physical register file (64 int + 64 fp). Default queue depths: InstructionBuffer=8, Issue RS=8.
-- Control: Global flush on branch mispredict (issue redirect) or `commit0_exception` to `TRAP_VECTOR`; commit1 is suppressed on commit0 exception; rename redirect restore uses ROB checkpoints for maps/head/count but free list contents are not checkpointed (known bug); predictor flush clears GHR/RAS only.
+- Control: Global flush on branch mispredict (issue redirect) or `commit0_exception` to `TRAP_VECTOR`; commit1 is suppressed on commit0 exception; redirect recovery now guards the one-cycle "branch already committed" window so wrapped ROB ranges do not retain wrong-path uops; predictor flush clears GHR/RAS only.
+- ROB integrity: WB acceptance is now guarded by `{rob_idx, rob_gen}` matching. Each ROB slot carries a generation tag that increments on re-allocation, so stale late writebacks from squashed/reused slots are ignored.
 - Execute coverage: Integer ALU, branch/JAL/JALR (link), CSR array ops (4K CSR file), mul (combinational), div (fixed 8-count, single in-flight), basic FP add/sub/mul via `ibex_fpu` (combinational, 2-source only). LSU integrated with single outstanding/ordered issue (TLB + DCache).
 - Fetch status: Predictor wired; IF fetches from ICache (128-bit line buffer), stalls on miss; if predicted taken, slot1 is suppressed; if slot1 crosses a line, slot1 is suppressed.
 - Memory system: ICache + DCache connect through MemArbiter to MainMemory; DCache is 2-way with write-through on hits and writeback on dirty victim.
@@ -33,7 +34,9 @@ This document summarizes the current two-wide OoO core as wired today (including
 
 ## Notes / Risks (current)
 - CDB arbitration still only supports two producers; if LSU completes in the same cycle as two other producers, one result can be dropped.
-- Root-fix for the TASK[70] deadlock is now implemented in RTL (DispatchQueue + live scoreboard readiness at RS enqueue). This needs re-validation in simulation to confirm the prior timeout at 32/48 commits is gone.
+- Stale WB filtering is now implemented end-to-end (`RegRename`/`ROB`, `PostDecode`, `DispatchQueue`, `IssueBuffer`, `LSU`, `Top`) via ROB generation tags; regression simulation is still required to confirm the previous TASK[70] commit/memory mismatch is fully resolved.
+- Redirect recovery now handles the delayed-flush edge case where `rob_head` advances past `flush_rob_idx` before flush is applied; `IssueBuffer` and `RegRename` treat that case as "no survivors" instead of applying wrapped in-range filters.
+- Current failing root cause (TASK[70]) is instruction-stream corruption after redirect/trap recovery: in the same test, fetch at `pc=0x104c` is seen once as `0x02812423` and later as `0x00000000`, followed by `pc=0x1044` committing with `exc=1` even though it is `addi sp,sp,-48`; this points to cache/memory path inconsistency rather than rename/ROB-only logic.
 - Rename free list recovery remains risky: redirect recovery rebuilds free-list contents from checkpoints/ROB visibility rather than restoring a true per-checkpoint queue image, so multi-redirect corner cases can still mis-allocate physical registers.
 - FP compare/cvt and destination typing are inconsistent: OP-FP compare decodes to `FP_OP_CMP` (alias of DUMMY), and compare results are routed to FP regs instead of integer regs.
 - FP div/sqrt/cvt/fma semantics are not implemented; FMA uses C=0 in the current wiring.

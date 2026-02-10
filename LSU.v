@@ -13,6 +13,7 @@ module LSU (
     input wire mem_is_load,
     input wire mem_unsigned,
     input wire [`ROB_IDX_WIDTH-1:0] rob_idx_in,
+    input wire [`ROB_GEN_WIDTH-1:0] rob_gen_in,
     input wire [`PREG_IDX_WIDTH-1:0] rd_tag_in,
     input wire rd_is_fp_in,
 
@@ -21,6 +22,7 @@ module LSU (
     output reg  wb_valid,         // 写回有效
     output reg  [31:0] wb_value,  // 写回数据
     output reg  [`ROB_IDX_WIDTH-1:0] wb_rob_idx,
+    output reg  [`ROB_GEN_WIDTH-1:0] wb_rob_gen,
     output reg  [`PREG_IDX_WIDTH-1:0] wb_dest_tag,
     output reg  wb_dest_is_fp,
     output reg  wb_exception,     // 发生异常（如非法访问）
@@ -47,6 +49,7 @@ module LSU (
     reg mem_is_load_reg;
     reg mem_unsigned_reg;
     reg [`ROB_IDX_WIDTH-1:0] rob_idx_reg;
+    reg [`ROB_GEN_WIDTH-1:0] rob_gen_reg;
     reg [`PREG_IDX_WIDTH-1:0] rd_tag_reg;
     reg rd_is_fp_reg;
 
@@ -152,11 +155,13 @@ module LSU (
             state <= IDLE;
             wb_valid <= 0;
             wb_exception <= 0;
+            wb_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
         end else begin
             if (flush) begin
                 state <= IDLE;
                 wb_valid <= 0;
                 wb_exception <= 0;
+                wb_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
             end else begin
                 case (state)
                     IDLE: begin
@@ -166,6 +171,7 @@ module LSU (
                                 wb_valid <= 1;
                                 wb_value <= 32'b0;
                                 wb_rob_idx <= rob_idx_in;
+                                wb_rob_gen <= rob_gen_in;
                                 wb_dest_tag <= rd_tag_in;
                                 wb_dest_is_fp <= rd_is_fp_in;
                                 wb_exception <= 1'b1;
@@ -177,6 +183,7 @@ module LSU (
                                 mem_is_load_reg <= mem_is_load;
                                 mem_unsigned_reg <= mem_unsigned;
                                 rob_idx_reg <= rob_idx_in;
+                                rob_gen_reg <= rob_gen_in;
                                 rd_tag_reg <= rd_tag_in;
                                 rd_is_fp_reg <= rd_is_fp_in;
                                 state <= WAIT_CACHE;
@@ -190,6 +197,7 @@ module LSU (
                             // 如果是 Load，写回读取的数据；如果是 Store，写回 0 
                             wb_value <= mem_is_load_reg ? final_rdata : 32'b0;
                             wb_rob_idx <= rob_idx_reg;
+                            wb_rob_gen <= rob_gen_reg;
                             wb_dest_tag <= rd_tag_reg;
                             wb_dest_is_fp <= rd_is_fp_reg;
                             wb_exception <= 0;
