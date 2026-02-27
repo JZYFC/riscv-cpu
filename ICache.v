@@ -1,5 +1,7 @@
 `include "riscv_define.v"
 
+// 2-way set-associative instruction cache with line refill.
+// This cache is read-only from the CPU side and allocates on miss.
 module ICache (
     input wire clk,
     input wire rst_n,
@@ -29,6 +31,7 @@ module ICache (
     assign tag   = paddr[31 : 32-TAG_BITS];
     assign index = paddr[4 + `CACHE_INDEX_BITS - 1 : 4];
 
+    // Tag format: {dirty, valid, tag}. Dirty is unused for I-cache and kept 0.
     reg [127:0] data_way0 [0:SETS-1];
     reg [127:0] data_way1 [0:SETS-1];
     reg [TAG_BITS+1:0] tag_way0 [0:SETS-1];
@@ -62,6 +65,8 @@ module ICache (
     reg [31:0] miss_line_addr;
 
     integer i;
+    // IDLE: probe tags for current request.
+    // REFILL: hold one miss context until matching memory response arrives.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
@@ -92,9 +97,11 @@ module ICache (
                 IDLE: begin
                     if (req) begin
                         if (hit) begin
+                            // Return line immediately on hit and update LRU.
                             valid_out <= 1'b1;
                             lru[index] <= hit0 ? 1'b1 : 1'b0;
                         end else begin
+                            // Capture miss metadata so refill does not depend on live paddr.
                             state <= REFILL;
                             miss_index <= index;
                             miss_tag <= tag;

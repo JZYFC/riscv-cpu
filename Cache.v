@@ -1,5 +1,7 @@
 `include "riscv_define.v"
 
+// 2-way set-associative data cache.
+// Policy: write-allocate + write-through (dirty bit kept clear on committed lines).
 module Cache (
     input wire clk,
     input wire rst_n,
@@ -42,6 +44,7 @@ module Cache (
     // Low bits [3 : 0]
     assign offset= paddr[3:0];
 
+    // Tag format: {dirty, valid, tag}. Dirty is only used on victim writeback path.
     reg [127:0] data_way0 [0:SETS-1];
     reg [127:0] data_way1 [0:SETS-1];
     reg [TAG_BITS+1:0] tag_way0 [0:SETS-1];
@@ -93,6 +96,10 @@ module Cache (
         endcase
     end
 
+    // IDLE: tag check / hit handling.
+    // WRITEBACK: evict dirty victim line.
+    // REFILL: request new line and optionally merge pending store.
+    // WRITE_THROUGH: forward committed store line to memory.
     localparam IDLE = 0, REFILL = 1, WRITEBACK = 2, WRITE_THROUGH = 3;
     reg [1:0] state;
     integer i;
@@ -109,6 +116,7 @@ module Cache (
     assign stall_cpu = (req && !hit);
     reg [127:0] temp_data;
     reg [TAG_BITS+1:0] temp_tag;
+    // Latched context for in-flight operations.
     reg [127:0] wt_data;
     reg [31:0]  wt_addr;
     reg         miss_we;
@@ -163,6 +171,7 @@ module Cache (
                             lru[index] <= hit0 ? 1'b1 : 1'b0;
 
                             if (we) begin
+                                // Store hit: update cache line first, then issue write-through.
                                 if (hit0) begin
                                     // Write-through: keep line clean
                                     temp_tag = tag_way0[index];
@@ -248,7 +257,8 @@ module Cache (
                                 valid_out <= 1;
                             end
                         end else begin
-                            // Miss
+                            // Miss path: latch request metadata to keep behavior stable
+                            // while state machine progresses through writeback/refill.
                             miss_we <= we;
                             miss_addr <= paddr;
                             miss_wdata <= wdata;
@@ -278,6 +288,7 @@ module Cache (
                 end
 
                 WRITEBACK: begin
+                    // Keep writeback request active until memory acknowledges.
                     if (mem_ready) begin
                         state <= REFILL;
                         mem_addr <= {miss_addr[31:4], 4'b0000};
@@ -292,6 +303,7 @@ module Cache (
                 end
 
                 REFILL: begin
+                    // Wait for the requested line; ignore non-matching responses.
                     if (mem_ready) begin
                         // Only install refill data if the response address matches the miss.
                         // Prevents silent corruption if memory responses are mis-associated.
@@ -347,6 +359,7 @@ module Cache (
                                      miss_addr, miss_offset, miss_wdata, miss_wstrb, temp_data);
                         end
                         if (miss_we) begin
+                            // Write miss becomes "refill then write-through".
                             wt_data <= temp_data;
                             wt_addr <= {miss_addr[31:4], 4'b0000};
                             mem_addr <= {miss_addr[31:4], 4'b0000};
@@ -365,6 +378,7 @@ module Cache (
                     end
                 end
                 WRITE_THROUGH: begin
+                    // Ensure memory has accepted the updated line before releasing CPU.
                     if (mem_ready) begin
                         state <= IDLE;
                         valid_out <= 1;

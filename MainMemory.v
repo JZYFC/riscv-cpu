@@ -1,5 +1,8 @@
 `include "riscv_define.v"
 
+// Simple line-based backing memory model.
+// Accepts one outstanding 128-bit transaction at a time and returns
+// a line-aligned response address with completion.
 module MainMemory (
     input wire clk,
     input wire rst_n,
@@ -16,14 +19,17 @@ module MainMemory (
     output reg [31:0]  mem_resp_addr
 );
 
+    // 256 cache lines of 128-bit data (4 KB total backing store).
     reg [127:0] ram [0:255];
     integer delay_cnt;
     localparam LATENCY = 4;
+    // Latched transaction info while simulating fixed memory latency.
     reg txn_active;
     reg txn_we;
     reg [31:0] txn_addr;
     reg [127:0] txn_wdata;
 
+    // Single-outstanding transaction model.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             mem_ready <= 0;
@@ -68,6 +74,7 @@ module MainMemory (
         end
     end
 
+    // Minimal boot contents for simulation bring-up.
     initial begin
         ram[8'h00] = 128'hDEAD_BEEF_CAFE_BABE_0123_4567_89AB_CDEF;
         ram[8'h01] = 128'h1111_2222_3333_4444_5555_6666_7777_8888;

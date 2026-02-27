@@ -1,27 +1,29 @@
 `include "riscv_define.v"
 
+// Small fully-associative TLB with round-robin replacement.
+// Used by LSU for simple virtual-to-physical translation.
 module TLB #(
-    parameter TLB_ENTRIES = 8 // 表项数
+    parameter TLB_ENTRIES = 8 // Number of entries
 )(
     input wire clk,
     input wire rst_n,
 
-    // 查找请求
-    input wire [31:0] vaddr,      // 虚拟地址
-    input wire        req,        // 查找请求信号
-    
-    // 查找结果
-    output reg [31:0] paddr,      // 物理地址
-    output reg        hit,        // 命中信号
-    output reg        miss,       // 未命中信号
+    // Lookup request
+    input wire [31:0] vaddr,      // Virtual address
+    input wire        req,        // Lookup valid
 
-    // 维护接口
-    input wire        we,         // 写使能
-    input wire [31:0] w_vaddr,    // 要写入的虚拟地址
-    input wire [31:0] w_paddr     // 要写入的物理地址
+    // Lookup result
+    output reg [31:0] paddr,      // Physical address
+    output reg        hit,        // Translation hit
+    output reg        miss,       // Translation miss
+
+    // Fill/update interface
+    input wire        we,         // Write enable
+    input wire [31:0] w_vaddr,    // Virtual address to insert
+    input wire [31:0] w_paddr     // Physical address to insert
 );
 
-    // 计算 Log2 的函数 (替代系统函数 $clog2)
+    // Portable log2 helper (for environments without $clog2).
     function integer clog2_func;
         input integer value;
         begin
@@ -33,38 +35,37 @@ module TLB #(
 
     localparam PTR_WIDTH = clog2_func(TLB_ENTRIES);
 
-    // TLB 表项结构
+    // Entry arrays
     reg                   valid [0:TLB_ENTRIES-1];
     reg [`VPN_WIDTH-1:0]  vpn   [0:TLB_ENTRIES-1];
     reg [`PPN_WIDTH-1:0]  ppn   [0:TLB_ENTRIES-1];
-    
-    // 替换指针
-    reg [PTR_WIDTH-1:0] replace_ptr; 
 
-    // 提取虚拟页号
+    // Round-robin replacement pointer.
+    reg [PTR_WIDTH-1:0] replace_ptr;
+
     wire [`VPN_WIDTH-1:0] current_vpn;
     wire [`PAGE_OFFSET_BITS-1:0] offset;
-    
+
     assign current_vpn = vaddr[31:12];
     assign offset      = vaddr[11:0];
 
-    // 并行查找
+    // Match vector over all entries.
     reg [TLB_ENTRIES-1:0] match_vec;
     integer i;
-    
+
     always @(*) begin
         for (i = 0; i < TLB_ENTRIES; i = i + 1) begin
-            match_vec[i] = valid[i] && (vpn[i] == current_vpn); 
+            match_vec[i] = valid[i] && (vpn[i] == current_vpn);
         end
     end
 
-    // 生成结果
+    // Combinational lookup result.
     always @(*) begin
         hit = 0;
         paddr = 32'b0;
         miss = 0;
         if (req) begin
-            if (match_vec != 0) begin // 如果有一位匹配
+            if (match_vec != 0) begin // Use matching entry's PPN + page offset.
                 hit = 1;
                 for (i = 0; i < TLB_ENTRIES; i = i + 1) begin
                     if (match_vec[i]) paddr = {ppn[i], offset};
@@ -75,7 +76,7 @@ module TLB #(
         end
     end
 
-    // 更新逻辑
+    // Sequential update path.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             replace_ptr <= 0;
@@ -84,7 +85,7 @@ module TLB #(
             valid[replace_ptr] <= 1'b1;
             vpn[replace_ptr]   <= w_vaddr[31:12];
             ppn[replace_ptr]   <= w_paddr[31:12];
-            replace_ptr        <= replace_ptr + 1; 
+            replace_ptr        <= replace_ptr + 1;
         end
     end
 

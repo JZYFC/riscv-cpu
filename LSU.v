@@ -1,5 +1,9 @@
 `include "riscv_define.v"
 
+// Load/Store Unit:
+// - Accepts one memory micro-op at a time from issue.
+// - Performs alignment check, address translation (TLB), and cache access.
+// - Emits a single writeback event with data or exception.
 module LSU (
     input wire clk,
     input wire rst_n,
@@ -37,13 +41,13 @@ module LSU (
     input  wire [31:0] mem_resp_addr
 );
 
-    // 状态机定义
+    // State machine
     localparam IDLE = 2'd0;
     localparam WAIT_CACHE = 2'd1;
     localparam DONE = 2'd2;
     reg [1:0] state;
 
-    // 锁存输入信号
+    // Latched request payload while memory operation is in flight.
     reg [31:0] addr_reg;
     reg [31:0] wdata_reg;
     reg [`MEM_OP_WIDTH-1:0] mem_op_reg;
@@ -56,7 +60,7 @@ module LSU (
 
     assign busy = (state != IDLE);
 
-    // === TLB 实例 ===
+    // Address translation (TLB lookup in parallel with cache request phase).
     wire [31:0] tlb_paddr;
     wire tlb_hit, tlb_miss;
     TLB u_tlb (
@@ -66,15 +70,15 @@ module LSU (
         .we(1'b0), .w_vaddr(32'b0), .w_paddr(32'b0)
     );
 
-    // 如果 TLB 没命中，默认物理地址 = 虚拟地址 (Bare-metal 模式)
+    // Bare-metal fallback: treat virtual address as physical on TLB miss.
     wire [31:0] effective_paddr = tlb_hit ? tlb_paddr : addr_reg;
 
-    // === Cache 实例 ===
+    // Data cache instance.
     wire [31:0] cache_rdata;
     wire cache_valid_out;
     wire cache_stall;
     
-    // 生成 Cache 写选通 (wstrb)
+    // Byte-enable generation for stores.
     reg [3:0] wstrb;
     always @(*) begin
         case (mem_op_reg)
@@ -85,7 +89,7 @@ module LSU (
         endcase
     end
 
-    // 对齐写数据
+    // Align store payload according to operation width.
     reg [31:0] aligned_wdata;
     always @(*) begin
         case (mem_op_reg)
@@ -123,13 +127,13 @@ module LSU (
         .mem_resp_addr(mem_resp_addr)
     );
 
-    // === Load 数据扩展逻辑 ===
+    // Load data extraction and sign/zero extension.
     reg [31:0] final_rdata;
     reg [7:0]  b_data;
     reg [15:0] h_data;
     
     always @(*) begin
-        // 根据地址低位选择字节/半字
+        // Select byte/halfword slice from returned 32-bit word.
         case (addr_reg[1:0])
             2'b00: b_data = cache_rdata[7:0];
             2'b01: b_data = cache_rdata[15:8];
@@ -151,7 +155,7 @@ module LSU (
         endcase
     end
 
-    // === 主控状态机 ===
+    // Main control FSM.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
@@ -170,6 +174,7 @@ module LSU (
                         wb_valid <= 0;
                         if (valid_in) begin
                             if (misaligned_in) begin
+                                // Architectural alignment exception: complete immediately.
                                 wb_valid <= 1;
                                 wb_value <= 32'b0;
                                 wb_rob_idx <= rob_idx_in;
@@ -193,17 +198,17 @@ module LSU (
                         end
                     end
                     WAIT_CACHE: begin
-                        // Cache 命中且返回有效数据 
+                        // Cache finishes request (including miss/refill internally).
                         if (cache_valid_out) begin
                             wb_valid <= 1;
-                            // 如果是 Load，写回读取的数据；如果是 Store，写回 0 
+                            // Loads return data; stores return a zero payload.
                             wb_value <= mem_is_load_reg ? final_rdata : 32'b0;
                             wb_rob_idx <= rob_idx_reg;
                             wb_rob_gen <= rob_gen_reg;
                             wb_dest_tag <= rd_tag_reg;
                             wb_dest_is_fp <= rd_is_fp_reg;
                             wb_exception <= 0;
-                            state <= IDLE; // 任务完成，回到 IDLE
+                            state <= IDLE;
                         end
                     end
                 endcase

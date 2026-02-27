@@ -1,5 +1,7 @@
 `include "riscv_define.v"
 
+// Lightweight single-precision floating-point execution block.
+// Selects among add/sub/mul/fused-like ops and comparison helpers.
 module ibex_fpu(
     input  [31:0]                          A_i,
     input  [31:0]                          B_i,
@@ -274,6 +276,7 @@ module ibex_fpu(
 endmodule
 
 
+// IEEE-754-like adder/subtractor datapath used by FPU top logic.
 module adder(a, b, out);
   input  [31:0] a, b;
   output [31:0] out;
@@ -379,6 +382,7 @@ module adder(a, b, out);
   end
 endmodule
 
+// IEEE-754-like multiplier datapath used by FPU top logic.
 module multiplier(a, b, out);
   input  [31:0] a, b;
   output [31:0] out;
@@ -449,6 +453,7 @@ module multiplier(a, b, out);
     end
 endmodule
 
+// Left-shift normalizer for adder mantissa/exponent output.
 module addition_normaliser(in_e, in_m, out_e, out_m);
   input [7:0] in_e;
   input [24:0] in_m;
@@ -525,6 +530,7 @@ module addition_normaliser(in_e, in_m, out_e, out_m);
   end
 endmodule
 
+// Left-shift normalizer for multiplier mantissa/exponent output.
 module multiplication_normaliser(in_e, in_m, out_e, out_m);
   input [7:0] in_e;
   input [47:0] in_m;
@@ -556,6 +562,7 @@ module multiplication_normaliser(in_e, in_m, out_e, out_m);
   end
 endmodule
 
+// Floating-point less-than comparison helper (handles signed zero edge case).
 module fless(
     input wire [31:0] a,
     input wire [31:0] b,
@@ -592,6 +599,7 @@ module fless(
 endmodule
 
 
+// Floating-point equality helper (treats +0 and -0 as equal).
 module feq(
     input wire [31:0] a,
     input wire [31:0] b,

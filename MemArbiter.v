@@ -1,5 +1,7 @@
 `include "riscv_define.v"
 
+// Single-port memory arbiter between instruction-side and data-side clients.
+// D-side requests have priority when both arrive in the same cycle.
 module MemArbiter (
     input wire clk,
     input wire rst_n,
@@ -35,10 +37,12 @@ module MemArbiter (
     // State machine: prioritize D-Cache over I-Cache
     localparam IDLE = 0, SERVE_D = 1, SERVE_I = 2;
     reg [1:0] state;
+    // Latched copy of selected request (kept for observability/debug).
     reg       serving_we;
     reg [31:0]  serving_addr;
     reg [127:0] serving_wdata;
 
+    // Request selection and ownership state.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
@@ -70,7 +74,7 @@ module MemArbiter (
         end
     end
 
-    // Combinational routing
+    // Combinational routing of request/response signals.
     always @(*) begin
         mem_req = 0; mem_we = 0; mem_addr = 0; mem_wdata = 0;
         d_ready = 0; d_rdata = 0;
