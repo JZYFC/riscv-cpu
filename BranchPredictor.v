@@ -107,13 +107,13 @@ module BranchPredictor #(
                 end
                 // RAS maintenance
                 if (is_call) begin
-                    ras[ras_sp[$clog2(RAS_DEPTH)-1:0]] <= pc + `INST_ADD_STEP;
-                    if (ras_sp != RAS_DEPTH) ras_sp <= ras_sp + 1'b1;
+                    ras[ras_sp[$clog2(RAS_DEPTH)-1:0]] = pc + `INST_ADD_STEP;
+                    if (ras_sp != RAS_DEPTH) ras_sp = ras_sp + 1'b1;
                 end else if (is_return && ras_sp != 0) begin
-                    ras_sp <= ras_sp - 1'b1;
+                    ras_sp = ras_sp - 1'b1;
                 end
                 // GHR shift in actual outcome
-                ghr <= {ghr[GHR_BITS-2:0], taken};
+                ghr = {ghr[GHR_BITS-2:0], taken};
             end
         end
     endtask

@@ -44,6 +44,10 @@ module Top_tb;
     localparam [2:0] F3_MULH    = 3'b001;
     localparam [2:0] F3_MULHSU  = 3'b010;
     localparam [2:0] F3_MULHU   = 3'b011;
+    localparam [2:0] F3_DIV     = 3'b100;
+    localparam [2:0] F3_DIVU    = 3'b101;
+    localparam [2:0] F3_REM     = 3'b110;
+    localparam [2:0] F3_REMU    = 3'b111;
     localparam [2:0] RM_RNE     = 3'b000;
     localparam [2:0] F3_CSRRW   = 3'b001;
     localparam [2:0] F3_CSRRS   = 3'b010;
@@ -1568,6 +1572,44 @@ module Top_tb;
                  32'h0000_1000,
                  5'd6, 5'd1, 32'h8000_0000, 5'd2, 32'h8000_0000, 32'h4000_0000);
 
+        // --- M Extension Division Tests (32-cycle IntDivider) ---
+
+        // DIV: 7 / 2 = 3  (signed, truncate toward zero)
+        run_test(54,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_DIV, 5'd3, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'd7, 5'd2, 32'd2, 32'd3);
+
+        // DIVU: 0xFFFFFFFE / 2 = 0x7FFFFFFF  (unsigned)
+        run_test(55,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_DIVU, 5'd3, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'hFFFF_FFFE, 5'd2, 32'd2, 32'h7FFF_FFFF);
+
+        // REM: 7 % 3 = 1  (signed remainder, same sign as dividend)
+        run_test(56,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_REM, 5'd3, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'd7, 5'd2, 32'd3, 32'd1);
+
+        // REMU: 0xFFFFFFFE % 3 = 2  (unsigned: 4294967294 % 3 = 2)
+        run_test(57,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_REMU, 5'd3, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'hFFFF_FFFE, 5'd2, 32'd3, 32'd2);
+
+        // DIV by zero: RISC-V spec -> quotient = 0xFFFFFFFF (-1)
+        run_test(58,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_DIV, 5'd3, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'd5, 5'd2, 32'd0, 32'hFFFF_FFFF);
+
+        // REM by zero: RISC-V spec -> remainder = dividend
+        run_test(59,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_REM, 5'd3, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'd5, 5'd2, 32'd0, 32'd5);
+
         // --- Zicsr Extension Tests ---
         
         // Initialize CSR 0x300 (mstatus) for read-modify-write tests
@@ -1618,6 +1660,20 @@ module Top_tb;
                  enc_i(12'h301, 5'd1, F3_CSRRCI, 5'd16, OPCODE_SYSTEM),
                  32'h0000_1000,
                  5'd16, 5'd0, 32'd0, 5'd0, 32'd0, 32'd7);
+
+        // --- Division Edge Cases: Signed Overflow (RISC-V spec) ---
+
+        // DIV(INT_MIN, -1): signed overflow -> quotient = INT_MIN (0x80000000)
+        run_test(67,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_DIV, 5'd3, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'h8000_0000, 5'd2, 32'hFFFF_FFFF, 32'h8000_0000);
+
+        // REM(INT_MIN, -1): signed overflow -> remainder = 0
+        run_test(68,
+                 enc_r(7'b0000001, 5'd2, 5'd1, F3_REM, 5'd3, OPCODE_OP),
+                 32'h0000_1000,
+                 5'd3, 5'd1, 32'h8000_0000, 5'd2, 32'hFFFF_FFFF, 32'd0);
 
         // --- Task-level Test: sum(int,int) ---
         task_reg_count = 0;

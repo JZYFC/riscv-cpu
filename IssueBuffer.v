@@ -367,6 +367,18 @@ module IssueBuffer #(
         .exception_flag_o(fpu_exc1)
     );
 
+    IntDivider u_divider (
+        .clk       (clk),
+        .rst_n     (rst_n),
+        .start     (div_start),
+        .dividend  (div_op1_r),
+        .divisor   (div_op2_r),
+        .is_signed (div_is_signed_r),
+        .is_rem    (div_is_rem_r),
+        .result    (div_result_wire),
+        .done      (div_done_wire)
+    );
+
     // Candidate generation (issue0, issue1, divider)
     wire cand0_has_dest = (rs_rd_tag[issue_idx0] != {`PREG_IDX_WIDTH{1'b0}});
     wire cand0_valid = (issue_idx0 != -1) && rs_valid[issue_idx0] &&
@@ -397,9 +409,15 @@ module IssueBuffer #(
     reg [`ROB_GEN_WIDTH-1:0] div_rob_gen;
     reg                      div_exception;
     reg                      div_busy;
-    reg [3:0]                div_counter;
     reg [`DATA_WIDTH-1:0]    div_value;
     reg                      div_done;
+    reg                      div_start;
+    reg [31:0]               div_op1_r;
+    reg [31:0]               div_op2_r;
+    reg                      div_is_signed_r;
+    reg                      div_is_rem_r;
+    wire [31:0]              div_result_wire;
+    wire                     div_done_wire;
     integer pick;
 
     wire cand2_valid = div_done && div_dest_valid;
@@ -594,9 +612,10 @@ module IssueBuffer #(
         wb2_rob_gen = {`ROB_GEN_WIDTH{1'b0}};
         wb0_value = {`DATA_WIDTH{1'b0}}; wb1_value = {`DATA_WIDTH{1'b0}}; wb2_value = {`DATA_WIDTH{1'b0}};
         wb0_exception = 1'b0; wb1_exception = 1'b0; wb2_exception = 1'b0;
-        wb0_dest_tag = {`PREG_IDX_WIDTH{1'b0}}; wb1_dest_tag = {`PREG_IDX_WIDTH{1'b0}}; div_dest_tag = {`PREG_IDX_WIDTH{1'b0}};
-        wb0_dest_valid = 1'b0; wb1_dest_valid = 1'b0; div_dest_valid = 1'b0;
-        wb0_dest_is_fp = 1'b0; wb1_dest_is_fp = 1'b0; div_dest_is_fp = 1'b0;
+        wb0_dest_tag = {`PREG_IDX_WIDTH{1'b0}}; wb1_dest_tag = {`PREG_IDX_WIDTH{1'b0}};
+        wb0_dest_valid = 1'b0; wb1_dest_valid = 1'b0;
+        wb0_dest_is_fp = 1'b0; wb1_dest_is_fp = 1'b0;
+        // div_dest_tag/valid/is_fp are sequential regs latched at issue time; do NOT drive here
         cdb0_valid = 1'b0; cdb1_valid = 1'b0;
         cdb0_tag = {`PREG_IDX_WIDTH{1'b0}}; cdb1_tag = {`PREG_IDX_WIDTH{1'b0}};
         cdb0_value = {`DATA_WIDTH{1'b0}}; cdb1_value = {`DATA_WIDTH{1'b0}};
@@ -751,16 +770,20 @@ module IssueBuffer #(
             lsu_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
             lsu_rd_tag <= {`PREG_IDX_WIDTH{1'b0}};
             lsu_rd_is_fp <= 1'b0;
-            div_busy <= 1'b0;
-            div_done <= 1'b0;
-            div_counter <= 4'b0;
-            div_dest_tag <= {`PREG_IDX_WIDTH{1'b0}};
-            div_dest_valid <= 1'b0;
-            div_dest_is_fp <= 1'b0;
-            div_rob_idx <= {`ROB_IDX_WIDTH{1'b0}};
-            div_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
-            div_exception <= 1'b0;
-            div_value <= {`DATA_WIDTH{1'b0}};
+            div_busy        <= 1'b0;
+            div_done        <= 1'b0;
+            div_start       <= 1'b0;
+            div_op1_r       <= 32'b0;
+            div_op2_r       <= 32'b0;
+            div_is_signed_r <= 1'b0;
+            div_is_rem_r    <= 1'b0;
+            div_dest_tag    <= {`PREG_IDX_WIDTH{1'b0}};
+            div_dest_valid  <= 1'b0;
+            div_dest_is_fp  <= 1'b0;
+            div_rob_idx     <= {`ROB_IDX_WIDTH{1'b0}};
+            div_rob_gen     <= {`ROB_GEN_WIDTH{1'b0}};
+            div_exception   <= 1'b0;
+            div_value       <= {`DATA_WIDTH{1'b0}};
             redirect_valid <= 1'b0;
             redirect_target <= {`INST_ADDR_WIDTH{1'b0}};
             redirect_rob_idx <= {`ROB_IDX_WIDTH{1'b0}};
@@ -773,6 +796,7 @@ module IssueBuffer #(
             bp_update0_is_return <= 1'b0; bp_update1_is_return <= 1'b0;
         end else if (flush) begin
             i_wr_we0 <= 1'b0; i_wr_we1 <= 1'b0; f_wr_we0 <= 1'b0; f_wr_we1 <= 1'b0;
+            div_start <= 1'b0;
             wb0_valid <= 1'b0; wb1_valid <= 1'b0; wb2_valid <= 1'b0;
             wb0_exception <= 1'b0; wb1_exception <= 1'b0;
             wb0_rob_gen <= {`ROB_GEN_WIDTH{1'b0}};
@@ -823,8 +847,9 @@ module IssueBuffer #(
             if (csr_we0 && issue_idx0 != -1) csr_file[rs_csr_addr[issue_idx0]] <= csr_new0;
             if (csr_we1 && issue_idx1 != -1) csr_file[rs_csr_addr[issue_idx1]] <= csr_new1;
 
-            // Default PRF writes low
+            // Default PRF writes low; default div_start low (set to 1 only when issuing DIV)
             i_wr_we0 <= 1'b0; i_wr_we1 <= 1'b0; f_wr_we0 <= 1'b0; f_wr_we1 <= 1'b0;
+            div_start <= 1'b0;
             lsu_valid <= 1'b0;
 
             // Track LSU request in flight until LSU actually goes busy (registered accept).
@@ -897,29 +922,19 @@ module IssueBuffer #(
                     rs_valid[issue_idx0] <= 1'b0;
                     issue_cnt = issue_cnt + 1;
                 end else if (!div_busy) begin
-                    // Start divider
-                    div_busy <= 1'b1;
-                    div_counter <= 4'd8;
-                    div_dest_tag <= rs_rd_tag[issue_idx0];
-                    div_dest_valid <= (rs_rd_tag[issue_idx0] != {`PREG_IDX_WIDTH{1'b0}});
-                    div_dest_is_fp <= rs_rd_is_fp[issue_idx0];
-                    div_rob_idx <= rs_rob_idx[issue_idx0];
-                    div_rob_gen <= rs_rob_gen[issue_idx0];
-                    div_exception <= rs_illegal[issue_idx0];
-                    // Simple signed/unsigned division/remainder
-                    if (rs_div_is_rem[issue_idx0]) begin
-                        if (rs_rs2_val[issue_idx0]==0) div_value <= rs_rs1_val[issue_idx0];
-                        else if (rs_div_signed[issue_idx0])
-                            div_value <= $signed(rs_rs1_val[issue_idx0]) % $signed(rs_rs2_val[issue_idx0]);
-                        else
-                            div_value <= $unsigned(rs_rs1_val[issue_idx0]) % $unsigned(rs_rs2_val[issue_idx0]);
-                    end else begin
-                        if (rs_rs2_val[issue_idx0]==0) div_value <= {`DATA_WIDTH{1'b0}};
-                        else if (rs_div_signed[issue_idx0])
-                            div_value <= $signed(rs_rs1_val[issue_idx0]) / $signed(rs_rs2_val[issue_idx0]);
-                        else
-                            div_value <= $unsigned(rs_rs1_val[issue_idx0]) / $unsigned(rs_rs2_val[issue_idx0]);
-                    end
+                    // Start IntDivider module (handles edge cases + 32-cycle iteration)
+                    div_busy        <= 1'b1;
+                    div_dest_tag    <= rs_rd_tag[issue_idx0];
+                    div_dest_valid  <= (rs_rd_tag[issue_idx0] != {`PREG_IDX_WIDTH{1'b0}});
+                    div_dest_is_fp  <= rs_rd_is_fp[issue_idx0];
+                    div_rob_idx     <= rs_rob_idx[issue_idx0];
+                    div_rob_gen     <= rs_rob_gen[issue_idx0];
+                    div_exception   <= rs_illegal[issue_idx0];
+                    div_start       <= 1'b1;
+                    div_op1_r       <= rs_rs1_val[issue_idx0];
+                    div_op2_r       <= rs_rs2_val[issue_idx0];
+                    div_is_signed_r <= rs_div_signed[issue_idx0];
+                    div_is_rem_r    <= rs_div_is_rem[issue_idx0];
                     rs_valid[issue_idx0] <= 1'b0;
                     issue_cnt = issue_cnt + 1;
                 end
@@ -934,42 +949,31 @@ module IssueBuffer #(
                     rs_valid[issue_idx1] <= 1'b0;
                     issue_cnt = issue_cnt + 1;
                 end else if (!div_busy) begin
-                    div_busy <= 1'b1;
-                    div_counter <= 4'd8;
-                    div_dest_tag <= rs_rd_tag[issue_idx1];
-                    div_dest_valid <= (rs_rd_tag[issue_idx1] != {`PREG_IDX_WIDTH{1'b0}});
-                    div_dest_is_fp <= rs_rd_is_fp[issue_idx1];
-                    div_rob_idx <= rs_rob_idx[issue_idx1];
-                    div_rob_gen <= rs_rob_gen[issue_idx1];
-                    div_exception <= rs_illegal[issue_idx1];
-                    if (rs_div_is_rem[issue_idx1]) begin
-                        if (rs_rs2_val[issue_idx1]==0) div_value <= rs_rs1_val[issue_idx1];
-                        else if (rs_div_signed[issue_idx1])
-                            div_value <= $signed(rs_rs1_val[issue_idx1]) % $signed(rs_rs2_val[issue_idx1]);
-                        else
-                            div_value <= $unsigned(rs_rs1_val[issue_idx1]) % $unsigned(rs_rs2_val[issue_idx1]);
-                    end else begin
-                        if (rs_rs2_val[issue_idx1]==0) div_value <= {`DATA_WIDTH{1'b0}};
-                        else if (rs_div_signed[issue_idx1])
-                            div_value <= $signed(rs_rs1_val[issue_idx1]) / $signed(rs_rs2_val[issue_idx1]);
-                        else
-                            div_value <= $unsigned(rs_rs1_val[issue_idx1]) / $unsigned(rs_rs2_val[issue_idx1]);
-                    end
+                    // Start IntDivider module (handles edge cases + 32-cycle iteration)
+                    div_busy        <= 1'b1;
+                    div_dest_tag    <= rs_rd_tag[issue_idx1];
+                    div_dest_valid  <= (rs_rd_tag[issue_idx1] != {`PREG_IDX_WIDTH{1'b0}});
+                    div_dest_is_fp  <= rs_rd_is_fp[issue_idx1];
+                    div_rob_idx     <= rs_rob_idx[issue_idx1];
+                    div_rob_gen     <= rs_rob_gen[issue_idx1];
+                    div_exception   <= rs_illegal[issue_idx1];
+                    div_start       <= 1'b1;
+                    div_op1_r       <= rs_rs1_val[issue_idx1];
+                    div_op2_r       <= rs_rs2_val[issue_idx1];
+                    div_is_signed_r <= rs_div_signed[issue_idx1];
+                    div_is_rem_r    <= rs_div_is_rem[issue_idx1];
                     rs_valid[issue_idx1] <= 1'b0;
                     issue_cnt = issue_cnt + 1;
                 end
             end
 
-            // Divider countdown
+            // Capture divider result when IntDivider signals done.
+            // Guard with div_busy so a stale done after flush is ignored.
             div_done <= 1'b0;
-            if (div_busy) begin
-                if (div_counter != 0) begin
-                    div_counter <= div_counter - 1'b1;
-                    if (div_counter == 1) begin
-                        div_done <= 1'b1;
-                        div_busy <= 1'b0;
-                    end
-                end
+            if (div_done_wire && div_busy) begin
+                div_done  <= 1'b1;
+                div_busy  <= 1'b0;
+                div_value <= div_result_wire;
             end
 
             // Wakeup with CDB

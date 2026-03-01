@@ -148,11 +148,121 @@ assign inner_mul_res = $signed(inner_mul_rs1) * $signed(inner_mul_rs2); // force
 assign inner_mul_rd = require_low_part ? inner_mul_res[`DATA_WIDTH-1:0] : inner_mul_res[`DOUBLE_DATA_WIDTH-1:`DATA_WIDTH];
 
 // -- divs --
-// general division cannot be generated on some platforms, we'll use our own divider module
-// TODO: implement divider module
+// Division is handled by IntDivider module (instantiated in IssueBuffer)
 
 endmodule
 // EndRegion: Integer Multiplier and Divider ALU Module
+
+
+// 32-cycle restoring integer divider
+// Handles DIV, DIVU, REM, REMU per RISC-V spec edge cases
+module IntDivider (
+    input            clk,
+    input            rst_n,
+    input            start,       // 1-cycle pulse to begin computation
+    input  [31:0]    dividend,    // rs1
+    input  [31:0]    divisor,     // rs2
+    input            is_signed,   // 1 = signed (DIV/REM), 0 = unsigned (DIVU/REMU)
+    input            is_rem,      // 1 = output remainder, 0 = output quotient
+    output reg [31:0] result,
+    output reg        done        // 1-cycle pulse when result is ready
+);
+
+    reg         running;
+    reg [4:0]   count;        // 0..31, 32 steps total
+    reg [31:0]  q_reg;        // quotient accumulator; initialized to unsigned dividend
+    reg [31:0]  r_reg;        // partial remainder
+    reg [31:0]  udivisor_r;   // latched unsigned divisor
+    reg         quot_neg;     // negate quotient at end (signed division)
+    reg         rem_neg;      // negate remainder at end (signed division)
+    reg         latch_is_rem; // latched is_rem at start
+
+    // Combinational restoring-division step:
+    // shift partial remainder left by 1, bringing in the MSB of the dividend register
+    wire [31:0] p_shift = {r_reg[30:0], q_reg[31]};
+    // 33-bit subtract; p_sub[32]=1 means borrow (p_shift < udivisor_r)
+    wire [32:0] p_sub   = {1'b0, p_shift} - {1'b0, udivisor_r};
+
+    // Next-step values (used at count==31 to compute result before registers update)
+    wire [31:0] nxt_q = p_sub[32] ? {q_reg[30:0], 1'b0} : {q_reg[30:0], 1'b1};
+    wire [31:0] nxt_r = p_sub[32] ? p_shift              : p_sub[31:0];
+    // Sign-corrected final outputs
+    wire [31:0] final_q = quot_neg ? (~nxt_q + 1'b1) : nxt_q;
+    wire [31:0] final_r = rem_neg  ? (~nxt_r + 1'b1) : nxt_r;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            running      <= 1'b0;
+            done         <= 1'b0;
+            result       <= 32'b0;
+            count        <= 5'b0;
+            q_reg        <= 32'b0;
+            r_reg        <= 32'b0;
+            udivisor_r   <= 32'b0;
+            quot_neg     <= 1'b0;
+            rem_neg      <= 1'b0;
+            latch_is_rem <= 1'b0;
+        end else begin
+            done <= 1'b0; // default: not done
+
+            if (start) begin
+                latch_is_rem <= is_rem;
+
+                if (divisor == 32'b0) begin
+                    // RISC-V spec: divide by zero
+                    // quotient = 0xFFFFFFFF (-1), remainder = dividend
+                    done    <= 1'b1;
+                    result  <= is_rem ? dividend : 32'hFFFFFFFF;
+                    running <= 1'b0;
+                end else if (is_signed && (dividend == 32'h80000000) && (divisor == 32'hFFFFFFFF)) begin
+                    // RISC-V spec: signed overflow (INT_MIN / -1)
+                    // quotient = INT_MIN (0x80000000), remainder = 0
+                    done    <= 1'b1;
+                    result  <= is_rem ? 32'b0 : 32'h80000000;
+                    running <= 1'b0;
+                end else begin
+                    // Normal case: 32-cycle restoring division
+                    count   <= 5'd0;
+                    r_reg   <= 32'b0;
+                    running <= 1'b1;
+                    if (is_signed) begin
+                        quot_neg   <= dividend[31] ^ divisor[31];
+                        rem_neg    <= dividend[31];
+                        q_reg      <= dividend[31] ? (~dividend + 1'b1) : dividend;
+                        udivisor_r <= divisor[31]  ? (~divisor  + 1'b1) : divisor;
+                    end else begin
+                        quot_neg   <= 1'b0;
+                        rem_neg    <= 1'b0;
+                        q_reg      <= dividend;
+                        udivisor_r <= divisor;
+                    end
+                end
+            end else if (running) begin
+                if (count == 5'd31) begin
+                    // Final step: compute sign-corrected result
+                    running <= 1'b0;
+                    done    <= 1'b1;
+                    result  <= latch_is_rem ? final_r : final_q;
+                    q_reg   <= nxt_q;
+                    r_reg   <= nxt_r;
+                end else begin
+                    // Regular restoring step
+                    if (!p_sub[32]) begin
+                        // p_shift >= udivisor_r: quotient bit = 1
+                        r_reg <= p_sub[31:0];
+                        q_reg <= {q_reg[30:0], 1'b1};
+                    end else begin
+                        // p_shift < udivisor_r: quotient bit = 0, restore
+                        r_reg <= p_shift;
+                        q_reg <= {q_reg[30:0], 1'b0};
+                    end
+                    count <= count + 1'b1;
+                end
+            end
+        end
+    end
+
+endmodule
 
 
 // Dummy Top Level
