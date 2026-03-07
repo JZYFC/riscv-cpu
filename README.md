@@ -6,6 +6,14 @@
 
 **ISA 支持：** RV32I（整数基本集）、RV32M（乘除法完整实现：乘法单周期，除法 32 周期恢复式迭代除法器，符合 RISC-V 规范边界情况）、部分 RV32F（浮点解码 + ibex_fpu 单元已接入）、基础 CSR 指令。
 
+## 项目Quick Start
+
+仓库提供了 `scripts/create_project.tcl` 脚本，恢复 Vivado 工程结构。在项目根目录运行：
+
+```bash
+vivado -mode batch -source scripts/create_project.tcl
+```
+
 ---
 
 ## 文档目录
@@ -21,6 +29,7 @@
 | [07_control_flow.md](07_control_flow.md) | **全局控制与异常**：冲刷（flush）、重定向（redirect）、提交（commit）的完整信号链 |
 | [08_parameters.md](08_parameters.md) | **参数速查表**：riscv_define.v 中所有宏定义的含义与取值 |
 | [09_known_issues.md](09_known_issues.md) | **已知问题与局限性**：当前实现的缺陷、TODO 项、潜在陷阱 |
+| [10_software_tests.md](10_software_tests.md) | **软件测试基础设施**：sw/ 目录工具链、Top_tb_bin.v 测试台、测试用例说明与结果 |
 
 ---
 
@@ -45,22 +54,6 @@ ICache.v                → 指令缓存（见 05_memory.md）
 TLB.v                   → 地址转换表（见 05_memory.md）
 MemArbiter.v            → I$/D$ 总线仲裁（见 05_memory.md）
 MainMemory.v            → 仿真主存模型（见 05_memory.md）
-Top_tb.v                → 仿真顶层 testbench
+Top_tb.v                → 仿真顶层 testbench（内联 C 指令编码，unit-test 框架）
+Top_tb_bin.v            → 二进制加载测试台（+BIN=<path> plusarg，运行编译好的程序）
 ```
-
----
-
-## 快速上手：一条指令的完整旅程
-
-以一条 `ADD x3, x1, x2` 为例，追踪它从取指到提交的全过程：
-
-1. **IF** 从 ICache 取回 128 位缓存行，提取对应 32 位指令字，调用分支预测器；
-2. **InstructionBuffer** 暂存指令，解耦取指和解码速率；
-3. **PreDecode** 识别 rs1/rs2/rd/imm/fu_type；
-4. **RegRename** 将 x1→p_rs1、x2→p_rs2，为 x3 分配新物理寄存器 p_rd_new，旧映射 p_rd_old 记入 ROB；
-5. **PostDecode** 将 `ADD` 翻译成 `FU_DEC_INT + ALU_OP_ADD`；
-6. **IssueBuffer** 在保留站等待 p_rs1、p_rs2 均就绪，选出最老的就绪 INT 指令发射；
-7. **IntALU** 计算 rs1+rs2；
-8. **写回（WB）** 结果写入 PRF[p_rd_new]，ROB 条目标记 ready；
-9. **提交（Commit）** ROB head 指向该指令，释放 p_rd_old，架构状态更新；
-10. 若提交前发现异常则 flush 全流水线，PC 跳转至 TRAP_VECTOR。

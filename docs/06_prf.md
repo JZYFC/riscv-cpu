@@ -64,7 +64,7 @@ end
 
 ```
                 ┌──────────────────────┐
-IssueBuffer     │ PhysicalRegFileShared │
+IssueBuffer     │ PhysicalRegFileShared│
   issue_idx0 ──▶│ i_rs1_addr0          │──▶ int_rs1_data0 ──▶ IssueBuffer
   issue_idx0 ──▶│ i_rs2_addr0          │──▶ int_rs2_data0
   issue_idx1 ──▶│ i_rs1_addr1          │──▶ int_rs1_data1

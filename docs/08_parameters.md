@@ -35,7 +35,7 @@
 | `ALU_OP_SRL` | bit 6 | SRL/SRLI |
 | `ALU_OP_SRA` | bit 7 | SRA/SRAI |
 | `ALU_OP_MUL` | bit 8 | MUL/MULH/MULHSU/MULHU |
-| `ALU_OP_DIV` | bit 9 | DIV/DIVU/REM/REMU（TODO） |
+| `ALU_OP_DIV` | bit 9 | DIV/DIVU/REM/REMU（32 周期恢复式迭代除法器，已实现） |
 
 ---
 

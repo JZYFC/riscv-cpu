@@ -1,0 +1,30 @@
+# Vivado generated files
+*.cache/
+*.gen/
+*.hw/
+*.ip_user_files/
+*.sim/
+*.runs/
+xsim.dir/
+sim_run/
+webtalk/
+
+# Logs and journals
+*.log
+*.jou
+*.str
+
+# Temp / backup
+*.tmp
+*.backup
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+
+# Optional: ignore project file if using Tcl-only flow
+# *.xpr
+# *.xml

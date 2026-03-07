@@ -10,7 +10,7 @@ IssueBuffer
   │ redirect_target
   │ redirect_rob_idx
   └──────────────────────────────────────────────┐
-                                                  ▼
+                                                 ▼
 ROB (in RegRename.v)                          Top.v
   │ commit0_exception                         global_flush = redirect_valid | commit_exc
   └──────────────────────────────────────────▶ flush_target = redirect_valid ? redirect_target

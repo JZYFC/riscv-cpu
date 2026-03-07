@@ -1,0 +1,6 @@
+# Build outputs
+test.elf
+test.bin
+
+# Internal make state for selected test source
+.test-selection

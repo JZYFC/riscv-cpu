@@ -31,6 +31,34 @@ DCache 使用写透（Write-Through）策略，标签中的 dirty 位（`tag_way
 
 ---
 
+### Bug 3：sw/ 测试 test_add / test_add_noref 失败（exit code 3）
+
+**位置**：`sw/tests/test_add.c`，`sw/tests/test_add_noref.c`；触发路径为 `IssueBuffer.v` / `RegRename.v`
+
+**现象**：
+
+```
+test_add.c       → FAIL code 3  (sub(10,3) 比较失败)
+test_add_noref.c → FAIL code 3  (同样是 sub(10,3)，且比较的是字面量 7，不是 s1)
+test_add_notest2.c → PASS       (移除 add(-1,1) 后 sub(10,3) 通过)
+test_regkeep.c / test_regkeep2.c → PASS
+```
+
+**关键推断**：
+
+| 观察 | 排除的假设 |
+|------|-----------|
+| `test_add_noref.c` 与字面量 7 比较仍失败 | 不是 callee-saved 寄存器（s1）被污染 |
+| `test_add_notest2.c`（无 test2）通过 | bug 与执行 `add(-1, 1)=0` 之后的状态有关 |
+| `test_sub_simple.c` 通过 | 单独的 sub 函数调用无问题 |
+| `test_regkeep.c` 通过（同样的 phase1→phase2→phase3 结构） | 不是通用的 callee-saved 保持 bug |
+
+**怀疑方向**：`add(-1, 1)` 中 `add(0xFFFFFFFF, 1)` 在某些情况下触发分支预测误判，恢复路径中出现物理寄存器状态未正确恢复的边缘情况。sub 函数返回正确结果但在写回或提交过程中被旧的 speculative 值覆盖（generation tag 问题或 checkpoint 恢复时机）。
+
+**状态**：已确认、尚未修复。此 bug 仅在 sw/ 二进制加载测试台中出现，`Top_tb.v` 的 unit-test 框架未能覆盖此场景。
+
+---
+
 ## 9.2 已完成项（Previously TODO）
 
 ### 整数除法（DIV/DIVU/REM/REMU）✓

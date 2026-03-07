@@ -1,0 +1,15 @@
+# Latex ignores
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.nav
+*.out
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.xdv
+
+# Also ignore the PDF output
+*.pdf
